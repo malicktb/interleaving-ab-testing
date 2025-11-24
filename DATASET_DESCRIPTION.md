@@ -4,6 +4,8 @@
 
 This dataset comes from the PRM (Personalized Re-ranking for Recommendation) research from Alibaba's Taobao e-commerce platform. It contains real production data for training learning-to-rank and recommendation models.
 
+This dataset contains full lists of items shown to real users along with the corresponding user clicks/interactions. This enables offline simulation of recommendation experiments without needing to interact with live users - you can evaluate different ranking algorithms against actual user behavior.
+
 **Source:** https://github.com/hf4Academic/PRM
 
 ## Important: Feature Documentation Limitations
