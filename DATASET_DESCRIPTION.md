@@ -2,7 +2,7 @@
 
 ## Overview
 
-This dataset comes from the **PRM (Personalized Re-ranking for Recommendation)** research from Alibaba's Taobao e-commerce platform. It contains real production data for training learning-to-rank and recommendation models.
+This dataset comes from the PRM (Personalized Re-ranking for Recommendation) research from Alibaba's Taobao e-commerce platform. It contains real production data for training learning-to-rank and recommendation models.
 
 **Source:** https://github.com/hf4Academic/PRM
 
@@ -126,15 +126,6 @@ The dataset is stored in Parquet format for efficient access:
   - Basic dense features: Always 7 per item
   - Optional dense features: Always 12 per item
   - Labels: Always 30 per record
-
-## Use Cases
-
-This dataset is designed for:
-- **Learning-to-rank (LTR)** model training and evaluation
-- **Interleaving experiment** analysis
-- **A/B testing** for recommendation systems
-- **Multi-item ranking** evaluation
-- **Personalized re-ranking** research (see original paper)
 
 ## References
 
