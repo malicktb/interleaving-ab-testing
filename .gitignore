@@ -1,3 +1,6 @@
-data/scripts/split_and_convert.py
-data/scripts/upload_parquet.py
+data/alibaba_dataset/scripts/validate_split.py
+data/alibaba_dataset/scripts/upload_parquet.py
+data/alibaba_dataset/scripts/split_and_convert.py
+data/alibaba_dataset/scripts/hash_split.py
+data/alibaba_dataset/scripts/example_usage.py
 parquet_chunks
