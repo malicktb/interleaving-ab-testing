@@ -1,0 +1,3 @@
+data/scripts/split_and_convert.py
+data/scripts/upload_parquet.py
+parquet_chunks
