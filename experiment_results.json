@@ -1,0 +1,120 @@
+{
+  "config": {
+    "alpha": 0.51,
+    "beta": 1.0,
+    "slate_size": 10,
+    "train_ratio": 0.8,
+    "split_seed": 42,
+    "num_chunks": 5,
+    "random_seed": 42,
+    "linear_sample_size": 16667
+  },
+  "metrics": {
+    "iterations": 1000,
+    "total_iterations": 1000,
+    "total_regret": 481.0,
+    "regret_rate": 0.481,
+    "total_clicks": 700,
+    "global_ctr": 0.7
+  },
+  "selection_rates": {
+    "stochastic": 0.046,
+    "popularity": 0.018,
+    "linear": 1.0
+  },
+  "win_rates": {
+    "stochastic": 0.014285714285714285,
+    "popularity": 0.0014285714285714286,
+    "linear": 0.9842857142857143
+  },
+  "strategy": {
+    "t": 1000,
+    "W": [
+      [
+        0.0,
+        0.0,
+        10.0
+      ],
+      [
+        1.0,
+        0.0,
+        1.0
+      ],
+      [
+        17.0,
+        8.0,
+        0.0
+      ]
+    ],
+    "N": [
+      [
+        0.0,
+        6.0,
+        46.0
+      ],
+      [
+        6.0,
+        0.0,
+        18.0
+      ],
+      [
+        46.0,
+        18.0,
+        0.0
+      ]
+    ],
+    "set_E": [
+      "linear"
+    ],
+    "set_F": [
+      "linear"
+    ],
+    "alpha": 0.51,
+    "beta": 1.0
+  },
+  "strategy_stats": {
+    "t": 1000,
+    "W": [
+      [
+        0.0,
+        0.0,
+        10.0
+      ],
+      [
+        1.0,
+        0.0,
+        1.0
+      ],
+      [
+        17.0,
+        8.0,
+        0.0
+      ]
+    ],
+    "N": [
+      [
+        0.0,
+        6.0,
+        46.0
+      ],
+      [
+        6.0,
+        0.0,
+        18.0
+      ],
+      [
+        46.0,
+        18.0,
+        0.0
+      ]
+    ],
+    "set_E": [
+      "linear"
+    ],
+    "set_F": [
+      "linear"
+    ],
+    "alpha": 0.51,
+    "beta": 1.0
+  }
+}

@@ -1,4 +1,5 @@
 parquet_chunks
-data/alibaba_dataset/scripts/validate_split.py
-data/alibaba_dataset/scripts/hash_split.py
-data/alibaba_dataset/scripts/example_usage.py
+
+__pycache__/
+*.pyc
+*.pyo
