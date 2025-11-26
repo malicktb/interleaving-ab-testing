@@ -3,7 +3,7 @@ This module handles loading the Alibaba dataset. It ensures that every experimen
 """
 
 from pathlib import Path
-from typing import Iterator, List, Literal, Optional, Tuple
+
 import numpy as np
 import pandas as pd
 
@@ -13,9 +13,9 @@ from .splitter import load_chunk_split
 class ReservoirSampler:
     """A helper to collect a small random sample from a massive stream.
 
-    We cannot train the Linear/MLP models on the full dataset (millions of rows)
-    without running out of RAM. This class watches the data stream and keeps
-    a fixed number of random records (e.g., 100,000) to represent the whole dataset.
+    We cannot train batch models (e.g., LinearArm) on the full dataset (millions
+    of rows) without running out of RAM. This class watches the data stream and
+    keeps a fixed number of random records to represent the whole dataset.
 
     Attributes:
         sample_size: How many records to keep in memory.
@@ -23,14 +23,24 @@ class ReservoirSampler:
         records_seen: Counter for how many rows have passed through.
     """
 
-    def __init__(self, sample_size: int, seed: int = 42):
+    def __init__(self, sample_size, seed=42):
+        """Initialize the reservoir sampler.
+
+        Args:
+            sample_size: Maximum number of records to keep.
+            seed: Seed for random number generator.
+        """
         self.sample_size = sample_size
         self.rng = np.random.default_rng(seed)
-        self.reservoir: List[dict] = []
+        self.reservoir = []
         self.records_seen = 0
 
-    def update(self, chunk_df: pd.DataFrame) -> None:
-        """Look at a new chunk of data and randomly keep some rows."""
+    def update(self, chunk_df):
+        """Look at a new chunk of data and randomly keep some rows.
+
+        Args:
+            chunk_df: DataFrame chunk to process.
+        """
         for idx in range(len(chunk_df)):
             self.records_seen += 1
             record = chunk_df.iloc[idx].to_dict()
@@ -45,17 +55,21 @@ class ReservoirSampler:
                 if j < self.sample_size:
                     self.reservoir[j] = record
 
-    def get_sample(self) -> pd.DataFrame:
-        """Return the final collected sample."""
+    def get_sample(self):
+        """Return the final collected sample.
+
+        Returns:
+            DataFrame containing the reservoir sample.
+        """
         return pd.DataFrame(self.reservoir)
 
 
 class DataLoader:
-    """Main interface for the Alibaba dataset.
+    """Main interface for loading parquet dataset chunks.
 
     This class manages the raw Parquet files and splits them into 'Train'
     and 'Test' sets based on a hash of the Record ID. This guarantees fairness:
-    every Agent sees the exact same data.
+    every Arm sees the exact same data.
 
     Attributes:
         parquet_dir: Folder where the data files live.
@@ -63,21 +77,27 @@ class DataLoader:
         seed: Random seed for consistent splitting.
     """
 
-    def __init__(
-        self,
-        parquet_dir: str = "parquet_chunks",
-        train_ratio: float = 0.8,
-        seed: int = 42,
-        num_chunks: Optional[int] = None,
-    ):
+    def __init__(self, parquet_dir="parquet_chunks", train_ratio=0.8, seed=42, num_chunks=None):
+        """Initialize the data loader.
+
+        Args:
+            parquet_dir: Directory containing parquet chunk files.
+            train_ratio: Fraction of data to use for training (0.0 to 1.0).
+            seed: Seed for deterministic splitting.
+            num_chunks: Optional limit on number of chunks to load (None for all).
+        """
         self.parquet_dir = Path(parquet_dir)
         self.train_ratio = train_ratio
         self.seed = seed
         self.num_chunks = num_chunks
         self._chunk_files = self._discover_chunks()
 
-    def _discover_chunks(self) -> List[Path]:
-        """Find all .parquet files in the directory."""
+    def _discover_chunks(self):
+        """Find all .parquet files in the directory.
+
+        Returns:
+            List of Path objects for each chunk file.
+        """
         if not self.parquet_dir.exists():
             raise FileNotFoundError(f"Parquet directory not found: {self.parquet_dir}")
 
@@ -91,15 +111,11 @@ class DataLoader:
         return chunks
 
     @property
-    def chunk_count(self) -> int:
+    def chunk_count(self):
         """Total number of file chunks found."""
         return len(self._chunk_files)
 
-    def stream_training_data(
-        self,
-        sample_size: int = 16667,
-        seed: int = 42,
-    ) -> Tuple[Iterator[pd.DataFrame], ReservoirSampler]:
+    def stream_training_data(self, sample_size=16667, seed=42):
         """Read training data for different types of Arms.
 
         This solves a specific problem:
@@ -119,7 +135,7 @@ class DataLoader:
         """
         sampler = ReservoirSampler(sample_size=sample_size, seed=seed)
 
-        def _generator() -> Iterator[pd.DataFrame]:
+        def _generator():
             for i, chunk_path in enumerate(self._chunk_files):
                 # Load only the 'Train' rows from this file
                 chunk_df = load_chunk_split(
@@ -141,12 +157,14 @@ class DataLoader:
 
         return _generator(), sampler
 
-    def iter_chunks(
-        self, split: Literal["train", "test", "all"] = "all"
-    ) -> Iterator[pd.DataFrame]:
+    def iter_chunks(self, split="all"):
         """Yield data in large blocks (DataFrames).
-        
-        Useful for batch processing when you don't need sampling.
+
+        Args:
+            split: Which split to load ('train', 'test', or 'all').
+
+        Yields:
+            DataFrame for each chunk.
         """
         for chunk_path in self._chunk_files:
             yield load_chunk_split(
@@ -156,13 +174,14 @@ class DataLoader:
                 seed=self.seed,
             )
 
-    def iter_records(
-        self, split: Literal["train", "test", "all"] = "all"
-    ) -> Iterator[dict]:
+    def iter_records(self, split="all"):
         """Yield data one row at a time (Dictionaries).
-        
-        Useful for the main Simulation Loop, where we simulate one user request
-        at a time.
+
+        Args:
+            split: Which split to load ('train', 'test', or 'all').
+
+        Yields:
+            Dictionary for each record.
         """
         for chunk_df in self.iter_chunks(split):
             yield from chunk_df.to_dict("records")

@@ -3,8 +3,6 @@ Base class for ranking models.
 """
 
 from abc import ABC, abstractmethod
-import numpy as np
-import pandas as pd
 
 
 class BaseArm(ABC):
@@ -18,17 +16,17 @@ class BaseArm(ABC):
         is_trained: True if the model is ready to use.
     """
 
-    def __init__(self, name: str):
+    def __init__(self, name):
         self.name = name
         self._is_trained = False
 
     @property
-    def is_trained(self) -> bool:
+    def is_trained(self):
         """Check if model is trained."""
         return self._is_trained
 
     @abstractmethod
-    def train(self, train_data: pd.DataFrame) -> None:
+    def train(self, train_data):
         """Train the model using historical data.
 
         Args:
@@ -37,13 +35,13 @@ class BaseArm(ABC):
         pass
 
     @abstractmethod
-    def rank(self, record: dict) -> np.ndarray:
+    def rank(self, record):
         """Rank the items for a single user request.
 
         Args:
-            record: Dictionary containing features for 30 items.
+            record: Dictionary containing item features and metadata.
 
         Returns:
-            Array of 30 item indices, sorted from best to worst.
+            Array of item indices, sorted from best to worst.
         """
         pass

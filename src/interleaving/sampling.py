@@ -9,7 +9,6 @@ of Interleaving (which only compares 2 models).
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Set, Tuple
 
 import numpy as np
 
@@ -31,13 +30,7 @@ class AttributionData:
     original_rank: int
 
 
-def sample_slate(
-    rankings: Dict[str, np.ndarray],
-    active_arms: Set[str],
-    slate_size: int = 10,
-    rng: np.random.Generator = None,
-    method: str = "team_draft",
-) -> Tuple[List[int], Dict[int, AttributionData]]:
+def sample_slate(rankings, active_arms, slate_size=10, rng=None, method="team_draft"):
     """Perform Team Draft Multileaving to create a mixed slate.
 
     This function executes the Multileaving process:
@@ -72,9 +65,9 @@ def sample_slate(
     draft_order = list(active_rankings.keys())
     rng.shuffle(draft_order)
 
-    slate: List[int] = []
-    attribution: Dict[int, AttributionData] = {}
-    drafted_items: Set[int] = set()
+    slate = []
+    attribution = {}
+    drafted_items = set()
 
     # Track how deep we are in each model's list
     pointers = {arm: 0 for arm in draft_order}
@@ -102,11 +95,7 @@ def sample_slate(
                     drafted_items.add(item_idx)
 
                     # Record attribution for the Multileaving update step
-                    attribution[item_idx] = AttributionData(
-                        arm_name=arm,
-                        original_rank=current_ptr - 1,  # 0-indexed
-                    )
-
+                    attribution[item_idx] = AttributionData(arm_name=arm, original_rank=current_ptr - 1)
                     pointers[arm] = current_ptr
                     items_added_this_round += 1
                     break
@@ -118,7 +107,7 @@ def sample_slate(
         if items_added_this_round == 0:
             break
 
-        # Reverse order for the next round (Snake Draft)
+        # Reverse order for the next round
         # This mitigates position bias in the Multileaving process.
         draft_order.reverse()
 

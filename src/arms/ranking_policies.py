@@ -27,25 +27,36 @@ class LinearArm(BaseArm):
     4. Item Category Features (5)
     """
 
-    def __init__(self, name: str = "linear", max_iter: int = 1000, random_state: int = 42):
+    def __init__(self, name="linear", max_iter=1000, random_state=42):
+        """Initialize the linear arm.
+
+        Args:
+            name: Unique identifier for this arm.
+            max_iter: Maximum iterations for logistic regression convergence.
+            random_state: Seed for reproducibility.
+        """
         super().__init__(name)
         self.scaler = StandardScaler()
         self.model = None
         self.max_iter = max_iter
         self.random_state = random_state
 
-    def extract_features(self, record: dict) -> np.ndarray:
+    def extract_features(self, record):
         """Convert a single data record into a feature matrix.
-        
+
+        Args:
+            record: Dictionary containing item and user features.
+
         Returns:
-            A (30, 27) numpy array representing the 30 items.
+            A (num_items, num_features) numpy array.
         """
         # 1. Stack the item-specific dense features
         d1 = np.vstack(record["items_dense_features"])
         d2 = np.vstack(record["items_dense_features2"])
 
-        # 2. Repeat the user features 30 times (so every item gets the context)
-        user_prof = np.tile(record["context_features"], (30, 1))
+        # 2. Repeat user features for each item (so every item gets the context)
+        num_items = len(record["items_dense_features"])
+        user_prof = np.tile(record["context_features"], (num_items, 1))
 
         # 3. Stack category IDs (treated as numbers)
         cats = np.vstack(record["items_features"]).astype(np.float64)
@@ -53,8 +64,12 @@ class LinearArm(BaseArm):
         # 4. Combine everything side-by-side
         return np.hstack([d1, d2, user_prof, cats])
 
-    def train(self, sample_df: pd.DataFrame) -> None:
-        """Train the model using a sample of historical data."""
+    def train(self, sample_df):
+        """Train the model using a sample of historical data.
+
+        Args:
+            sample_df: DataFrame containing training records with features and labels.
+        """
         X_list = []
         y_list = []
 
@@ -92,8 +107,15 @@ class LinearArm(BaseArm):
         self.model.fit(X_train_scaled, y_train)
         self._is_trained = True
 
-    def rank(self, record: dict) -> np.ndarray:
-        """Rank items by predicted click probability."""
+    def rank(self, record):
+        """Rank items by predicted click probability.
+
+        Args:
+            record: Dictionary containing item features.
+
+        Returns:
+            Array of item indices sorted by predicted click probability (highest first).
+        """
         X = self.extract_features(record)
 
         # Fill missing values with 0
@@ -116,29 +138,37 @@ class PopularityArm(BaseArm):
     into "Buckets." It then tracks how often items in that bucket get clicked.
     """
 
-    def __init__(
-        self,
-        name: str = "popularity",
-        num_buckets: int = 10000,
-        alpha: float = 1.0,
-        beta: float = 1.0,
-        seed: int = 42,
-    ):
+    def __init__(self, name="popularity", num_buckets=10000, alpha=1.0, beta=1.0, seed=42):
+        """Initialize the popularity arm.
+
+        Args:
+            name: Unique identifier for this arm.
+            num_buckets: Number of hash buckets for item grouping.
+            alpha: Dirichlet prior smoothing for clicks.
+            beta: Dirichlet prior smoothing for non-clicks.
+            seed: Seed for random projection weights.
+        """
         super().__init__(name)
         self.num_buckets = num_buckets
         self.alpha = alpha  # Smoothing for Clicks
         self.beta = beta    # Smoothing for Non-Clicks
-        self.ctr_table: dict = defaultdict(lambda: [0, 0])
+        self.ctr_table = defaultdict(lambda: [0, 0])
 
         # Generate random weights once (used for hashing)
         rng = np.random.default_rng(seed)
         self.proj_dense = rng.integers(1, 1000, size=7)
         self.proj_cats = rng.integers(1, 1000, size=5)
 
-    def _compute_hashes(
-        self, dense_features: np.ndarray, item_features: np.ndarray
-    ) -> np.ndarray:
-        """Map items to bucket IDs using math (Random Projections)."""
+    def _compute_hashes(self, dense_features, item_features):
+        """Map items to bucket IDs using random projections.
+
+        Args:
+            dense_features: Array of dense item features.
+            item_features: Array of categorical item features.
+
+        Returns:
+            Array of bucket IDs for each item.
+        """
         d_quant = (dense_features * 100).astype(int)
         c_int = item_features.astype(int)
 
@@ -148,10 +178,11 @@ class PopularityArm(BaseArm):
 
         return (h_dense + h_cats) % self.num_buckets
 
-    def _process_chunk(self, chunk_df: pd.DataFrame) -> None:
+    def _process_chunk(self, chunk_df):
         """Update popularity stats using a chunk of data.
-        
-        Called incrementally during streaming training.
+
+        Args:
+            chunk_df: DataFrame chunk containing items and labels.
         """
         # Flatten the data (batch process all items in the chunk)
         batch_dense = np.vstack([np.vstack(row) for row in chunk_df["items_dense_features"].values])
@@ -166,23 +197,33 @@ class PopularityArm(BaseArm):
             if label == 1.0:
                 self.ctr_table[bucket][0] += 1  # Count Click
 
-    def train(self, train_data: pd.DataFrame = None) -> None:
+    def train(self, train_data=None):
         """Placeholder. This arm uses streaming training via _process_chunk."""
         raise NotImplementedError(
             "PopularityArm uses streaming training. Call _process_chunk() instead."
         )
 
-    def _get_ctr(self, bucket: int) -> float:
-        """Calculate smoothed CTR.
-        
-        (Clicks + 1) / (Impressions + 2)
-        This ensures new items start with a fair score (0.5) instead of 0.
+    def _get_ctr(self, bucket):
+        """Calculate smoothed CTR using Dirichlet prior.
+
+        Args:
+            bucket: The bucket ID to look up.
+
+        Returns:
+            Smoothed CTR value: (Clicks + alpha) / (Impressions + alpha + beta).
         """
         clicks, impressions = self.ctr_table[bucket]
         return (clicks + self.alpha) / (impressions + self.alpha + self.beta)
 
-    def rank(self, record: dict) -> np.ndarray:
-        """Rank items by their bucket's popularity."""
+    def rank(self, record):
+        """Rank items by their bucket's popularity.
+
+        Args:
+            record: Dictionary containing item features.
+
+        Returns:
+            Array of item indices sorted by CTR (highest first).
+        """
         d_feats = np.vstack(record["items_dense_features"])
         c_feats = np.vstack(record["items_features"])
 

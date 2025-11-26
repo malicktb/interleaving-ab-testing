@@ -3,15 +3,9 @@
 Combines:
 - Dataset structure verification (parquet format, schema, consistency)
 - Hash-based split validation (ratio, coverage, reproducibility)
-
-Usage:
-    python validate_data.py structure   # Verify parquet structure
-    python validate_data.py split       # Validate train/test split
-    python validate_data.py all         # Run all validations
 """
 
 from io import BytesIO
-from typing import Optional
 
 import boto3
 import numpy as np
@@ -20,7 +14,7 @@ import pyarrow.parquet as pq
 from botocore import UNSIGNED
 from botocore.client import Config
 
-from src.data.splitter import (
+from src.data_utilities.splitter import (
     get_split_statistics,
     hash_record_id,
     load_chunk_split,
@@ -30,7 +24,7 @@ from src.data.splitter import (
 S3_BUCKET = "amzn-dataset-bucket"
 S3_PREFIX = "parquet_chunks/"
 
-def load_first_chunk_bytes() -> tuple:
+def load_first_chunk_bytes():
     """Load raw bytes of first parquet chunk from S3."""
     s3 = boto3.client("s3", config=Config(signature_version=UNSIGNED))
     paginator = s3.get_paginator("list_objects_v2")
@@ -46,7 +40,7 @@ def load_first_chunk_bytes() -> tuple:
     raise RuntimeError(f"No parquet files under s3://{S3_BUCKET}/{S3_PREFIX}")
 
 
-def verify_parquet_metadata(parquet_bytes: bytes) -> None:
+def verify_parquet_metadata(parquet_bytes):
     """Verify parquet file metadata."""
     print("\n" + "=" * 60)
     print("PARQUET METADATA")
@@ -57,7 +51,7 @@ def verify_parquet_metadata(parquet_bytes: bytes) -> None:
     print(f"Row groups: {pf.metadata.num_row_groups}")
 
 
-def verify_schema(df: pd.DataFrame) -> None:
+def verify_schema(df):
     """Verify DataFrame schema."""
     print("\n" + "=" * 60)
     print("SCHEMA")
@@ -67,7 +61,7 @@ def verify_schema(df: pd.DataFrame) -> None:
         print(f"  {col}: {df[col].dtype}")
 
 
-def verify_consistency(df: pd.DataFrame) -> bool:
+def verify_consistency(df):
     """Verify array lengths are consistent across all rows."""
     print("\n" + "=" * 60)
     print("CONSISTENCY CHECK")
@@ -102,7 +96,7 @@ def verify_consistency(df: pd.DataFrame) -> bool:
     return all_ok
 
 
-def verify_labels(df: pd.DataFrame) -> None:
+def verify_labels(df):
     """Verify label statistics."""
     print("\n" + "=" * 60)
     print("LABELS")
@@ -114,7 +108,7 @@ def verify_labels(df: pd.DataFrame) -> None:
     print(f"CTR: {ctr:.6f}")
 
 
-def run_structure_validation() -> bool:
+def run_structure_validation():
     """Run all structure validation checks."""
     print("\n" + "=" * 60)
     print("DATASET STRUCTURE VALIDATION")
@@ -131,7 +125,7 @@ def run_structure_validation() -> bool:
     print(f"\nVerified: {key} ({len(df)} records)")
     return passed
 
-def validate_hash_function() -> bool:
+def validate_hash_function():
     """Validate hash function determinism and distribution."""
     print("\n" + "=" * 60)
     print("HASH FUNCTION")
@@ -157,7 +151,7 @@ def validate_hash_function() -> bool:
     return deterministic and uniform
 
 
-def validate_split_ratio() -> bool:
+def validate_split_ratio():
     """Validate 80/20 split ratio."""
     print("\n" + "=" * 60)
     print("SPLIT RATIO")
@@ -177,7 +171,7 @@ def validate_split_ratio() -> bool:
     return passed
 
 
-def validate_coverage() -> bool:
+def validate_coverage():
     """Validate no overlap and complete coverage."""
     print("\n" + "=" * 60)
     print("COVERAGE")
@@ -201,7 +195,7 @@ def validate_coverage() -> bool:
     return len(overlap) == 0 and union == all_ids
 
 
-def validate_label_distribution() -> bool:
+def validate_label_distribution():
     """Validate similar CTR between train and test."""
     print("\n" + "=" * 60)
     print("LABEL DISTRIBUTION")
@@ -217,9 +211,9 @@ def validate_label_distribution() -> bool:
         train_stats = get_split_statistics(df, split="train", seed=42)
         test_stats = get_split_statistics(df, split="test", seed=42)
 
-        train_pos += train_stats["num_positive_labels"]
+        train_pos += train_stats["num_clicks"]
         train_total += train_stats["num_items"]
-        test_pos += test_stats["num_positive_labels"]
+        test_pos += test_stats["num_clicks"]
         test_total += test_stats["num_items"]
 
     train_ctr = train_pos / train_total if train_total else 0
@@ -233,7 +227,7 @@ def validate_label_distribution() -> bool:
     return diff_pct < 5.0
 
 
-def validate_reproducibility_check() -> bool:
+def validate_reproducibility_check():
     """Validate same seed produces same split."""
     print("\n" + "=" * 60)
     print("REPRODUCIBILITY")
@@ -245,7 +239,7 @@ def validate_reproducibility_check() -> bool:
     return result
 
 
-def run_split_validation() -> bool:
+def run_split_validation():
     """Run all split validation checks."""
     print("\n" + "=" * 60)
     print("HASH-BASED SPLIT VALIDATION")
@@ -267,32 +261,3 @@ def run_split_validation() -> bool:
         print(f"  {name}: {status}")
 
     return all(results.values())
-
-
-def main():
-    import sys
-
-    if len(sys.argv) < 2:
-        print("Usage: python validate_data.py [structure|split|all]")
-        sys.exit(1)
-
-    cmd = sys.argv[1]
-    passed = True
-
-    if cmd in ("structure", "all"):
-        passed = run_structure_validation() and passed
-    if cmd in ("split", "all"):
-        passed = run_split_validation() and passed
-
-    if cmd not in ("structure", "split", "all"):
-        print(f"Unknown command: {cmd}")
-        sys.exit(1)
-
-    print("\n" + "=" * 60)
-    print("ALL VALIDATIONS PASSED" if passed else "SOME VALIDATIONS FAILED")
-    print("=" * 60)
-    sys.exit(0 if passed else 1)
-
-
-if __name__ == "__main__":
-    main()

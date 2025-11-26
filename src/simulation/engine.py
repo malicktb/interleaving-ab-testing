@@ -2,18 +2,12 @@
 
 import time
 from collections import defaultdict
-from typing import Dict, Optional, List
 
 import numpy as np
-import pandas as pd
 
-from ..arms.base import BaseArm
 from ..arms.ranking_policies import PopularityArm
-from ..config import ExperimentConfig
-from ..data.loader import DataLoader
 from .rewards import compute_reward
 from ..interleaving.sampling import sample_slate
-from ..strategies.base import BaseStrategy
 from .telemetry import RegretTelemetry
 
 
@@ -27,13 +21,15 @@ class Simulation:
     4. The Telemetry (History/Logs)
     """
 
-    def __init__(
-        self,
-        config: ExperimentConfig,
-        arms: Dict[str, BaseArm],
-        strategy: BaseStrategy,
-        data_loader: DataLoader,
-    ):
+    def __init__(self, config, arms, strategy, data_loader):
+        """Initialize the simulation.
+
+        Args:
+            config: ExperimentConfig with hyperparameters.
+            arms: Dictionary mapping arm names to Arm instances.
+            strategy: BanditStrategy instance for arm selection.
+            data_loader: DataLoader for train/test data access.
+        """
         self.config = config
         self.arms = arms
         self.strategy = strategy
@@ -43,12 +39,12 @@ class Simulation:
         # Initialize History Tracker (Telemetry)
         self.history = RegretTelemetry(arm_names=list(arms.keys()))
 
-    def train_arms(self) -> None:
+    def train_arms(self):
         """Train all arms efficiently using Hybrid Streaming/Sampling.
 
         Leverages the DataLoader's `stream_training_data` to:
         1. Feed Streaming Arms (Popularity) chunk-by-chunk.
-        2. Auto-collect a Reservoir Sample for Batch Arms (Linear/MLP).
+        2. Auto-collect a Reservoir Sample for Batch Arms (Linear).
         """
         print(f"Starting training phase (Chunks: {self.data_loader.chunk_count})...")
         start_time = time.time()
@@ -69,7 +65,7 @@ class Simulation:
                 arm.ctr_table = defaultdict(lambda: [0, 0])
 
         # 2. Initialize Stream from Loader
-        # We target ~500k items for Linear/MLP training to prevent RAM explosion.
+        # We target ~500k items for Linear training to prevent RAM explosion.
         # 500k items / 30 items per request = ~16,667 requests.
         target_sample_requests = 16667
 
@@ -94,7 +90,7 @@ class Simulation:
             arm._is_trained = True
             print(f"  [Stream] {arm.name} trained on {total_streamed_records} records.")
 
-        # 5. Train Batch Arms (Linear, MLP, KNN)
+        # 5. Train Batch Arms (Linear)
         if batch_arms:
             # Retrieve the uniform random sample collected by the loader
             train_sample = sampler.get_sample()
@@ -106,10 +102,17 @@ class Simulation:
 
         print(f"Training complete in {time.time() - start_time:.1f}s")
 
-    def _get_best_arm(
-        self, record: dict, rankings: Dict[str, np.ndarray]
-    ) -> Optional[str]:
-        """Determine the Local Best Arm for a specific record, is the arm that placed a relevant item closest to the top (Rank 0).
+    def _get_best_arm(self, record, rankings):
+        """Determine the Local Best Arm for a specific record.
+
+        The best arm is the one that placed a relevant item closest to the top (Rank 0).
+
+        Args:
+            record: Dictionary containing item labels.
+            rankings: Dictionary mapping arm names to their item orderings.
+
+        Returns:
+            Name of the best arm, or None if no clicks in the record.
         """
         labels = np.array(record["labels"])
         clicked_indices = set(np.where(labels == 1.0)[0])
@@ -133,8 +136,15 @@ class Simulation:
 
         return best_arm
 
-    def run(self, max_iterations: Optional[int] = None) -> RegretTelemetry:
-        """Run the MAB simulation on test data."""
+    def run(self, max_iterations=None):
+        """Run the MAB simulation on test data.
+
+        Args:
+            max_iterations: Optional limit on number of iterations (None for full dataset).
+
+        Returns:
+            RegretTelemetry object containing the experiment history.
+        """
         print("Starting Simulation Loop...")
         iteration = 0
 
@@ -190,8 +200,12 @@ class Simulation:
         print(f"Simulation complete: {iteration} iterations processed.")
         return self.history
 
-    def get_results(self) -> dict:
-        """Return comprehensive experiment results package."""
+    def get_results(self):
+        """Return comprehensive experiment results package.
+
+        Returns:
+            Dictionary with config, metrics, selection_rates, win_rates, and strategy stats.
+        """
         num_iter = self.history.num_iterations
         total_regret = self.history.total_regret
         return {

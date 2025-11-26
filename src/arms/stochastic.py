@@ -2,9 +2,7 @@
 Random ranking policy (arm).
 """
 
-from typing import Optional
 import numpy as np
-import pandas as pd
 
 from .base import BaseArm
 
@@ -20,17 +18,31 @@ class StochasticArm(BaseArm):
         rng: Random number generator.
     """
 
-    def __init__(self, name: str = "stochastic", random_state: Optional[int] = 42):
+    def __init__(self, name="stochastic", random_state=42):
+        """Initialize the stochastic arm.
+
+        Args:
+            name: Unique identifier for this arm.
+            random_state: Seed for the random number generator.
+        """
         super().__init__(name)
         self.rng = np.random.default_rng(random_state)
 
-    def train(self, train_data: pd.DataFrame = None) -> None:
+    def train(self, train_data=None):
         """Do nothing.
         
         Random guessing does not require learning from historical data.
         """
         self._is_trained = True
 
-    def rank(self, record: dict) -> np.ndarray:
-        """Return a random list of item indices (0 to 29)."""
-        return self.rng.permutation(30)
+    def rank(self, record):
+        """Return a random permutation of item indices.
+
+        Args:
+            record: Dictionary containing item data including 'labels'.
+
+        Returns:
+            Array of randomly shuffled item indices.
+        """
+        num_items = len(record["labels"])
+        return self.rng.permutation(num_items)

@@ -6,8 +6,6 @@ in the paper: "Multi-Dueling Bandits and Their Application to Online Ranker Eval
 -- Brost, Seldin, Cox, & Lioma (2016)
 """
 
-from typing import Set
-
 import numpy as np
 
 from .base import BaseStrategy
@@ -19,9 +17,9 @@ class UCBSelectionStrategy(BaseStrategy):
     Based on the logic defined in Brost et al. (2016), this strategy maintains
     two checklists (Confidence Bounds) to balance exploration and exploitation:
 
-    1. Set E (Proven Winners): Models that are statistically better than others.
+    1. Set E (Proven Winners): Arms that are statistically better than others.
        (Corresponds to the "Narrow Confidence Bound" in the paper).
-    2. Set F (Potential Contenders): Models that might be the best if we
+    2. Set F (Potential Contenders): Arms that might be the best if we
        gave them a chance. (Corresponds to the "Wide Confidence Bound" in the paper).
 
     The Decision Rule (Algorithm 1 in the paper):
@@ -36,12 +34,14 @@ class UCBSelectionStrategy(BaseStrategy):
               See Equation (3) in the paper.
     """
 
-    def __init__(
-        self,
-        arm_names: list,
-        alpha: float = 0.51,
-        beta: float = 1.0,
-    ):
+    def __init__(self, arm_names, alpha=0.51, beta=1.0):
+        """Initialize the UCB strategy.
+
+        Args:
+            arm_names: List of arm names to track.
+            alpha: Exploration parameter (must be > 0.5). Controls optimism in UCB.
+            beta: Parallelism parameter (must be >= 1.0). Widens the contender set.
+        """
         super().__init__(arm_names)
 
         if alpha <= 0.5:
@@ -52,13 +52,16 @@ class UCBSelectionStrategy(BaseStrategy):
         self.alpha = alpha
         self.beta = beta
 
-    def _compute_ucb_matrix(self, beta_multiplier: float = 1.0) -> np.ndarray:
-        """Calculate the Upper Confidence Bound for every pair of models.
+    def _compute_ucb_matrix(self, beta_multiplier=1.0):
+        """Calculate the Upper Confidence Bound for every pair of arms.
 
         This implements Equations (2) and (3) from the Brost et al. paper.
 
-        Returns a matrix where cell [i, j] answers:
-        "Optimistically, what is the best possible win rate of Model i against Model j?"
+        Args:
+            beta_multiplier: Scaling factor for confidence width (1.0 for Set E, beta for Set F).
+
+        Returns:
+            K x K matrix where cell [i, j] is the optimistic win rate of Arm i vs Arm j.
         """
         # Handle the very first step (log(0) is impossible)
         log_t = np.log(max(self.t, 1))
@@ -90,40 +93,46 @@ class UCBSelectionStrategy(BaseStrategy):
 
         return ucb
 
-    def _compute_qualifying_set_vectorized(self, beta_multiplier: float) -> Set[int]:
-        """Find models that beat (or tie) EVERYONE else optimistically.
+    def _compute_qualifying_set_vectorized(self, beta_multiplier):
+        """Find arms that beat (or tie) EVERYONE else optimistically.
 
-        A model qualifies if its *lowest* predicted win rate against any opponent
+        An arm qualifies if its *lowest* predicted win rate against any opponent
         is still >= 50%.
+
+        Args:
+            beta_multiplier: Scaling factor for confidence width.
+
+        Returns:
+            Set of qualifying arm indices.
         """
         ucb_matrix = self._compute_ucb_matrix(beta_multiplier)
-        
-        # Find the worst matchup for each model (min over columns)
+
+        # Find the minimum UCB value for each arm across all opponents
         min_ucb_per_arm = np.min(ucb_matrix, axis=1)
         
         # Who survives the worst matchup?
         qualifying = np.where(min_ucb_per_arm >= 0.5)[0]
         return set(qualifying.tolist())
 
-    def compute_set_E(self) -> Set[int]:
+    def compute_set_E(self):
         """Find the 'Proven Winners' using the Narrow Bound (Eq 2)."""
         return self._compute_qualifying_set_vectorized(beta_multiplier=1.0)
 
-    def compute_set_F(self) -> Set[int]:
+    def compute_set_F(self):
         """Find the 'Potential Contenders' using the Wide Bound (Eq 3)."""
         return self._compute_qualifying_set_vectorized(beta_multiplier=self.beta)
 
-    def select_arms(self) -> Set[str]:
+    def select_arms(self):
         """Decide who plays in the next round based on Set E and Set F.
 
         Returns:
-            A set of arm names (e.g., {'Linear', 'MLP'}).
+            A set of arm names (e.g., {'Linear', 'Popularity'}).
         """
         E = self.compute_set_E()
         F = self.compute_set_F()
 
         if len(E) == 1:
-            # Case 1: We found the single best model. Use only it.
+            # Case 1: We found the single best arm. Use only it.
             selected_indices = E
         else:
             # Case 2: We are unsure. Let all potential contenders fight.
@@ -132,8 +141,12 @@ class UCBSelectionStrategy(BaseStrategy):
 
         return {self._idx_to_name(i) for i in selected_indices}
 
-    def get_statistics(self) -> dict:
-        """Return debug info about the sets."""
+    def get_statistics(self):
+        """Return debug info about the sets.
+
+        Returns:
+            Dictionary with W, N matrices, set_E, set_F, alpha, and beta.
+        """
         stats = super().get_statistics()
         E = self.compute_set_E()
         F = self.compute_set_F()

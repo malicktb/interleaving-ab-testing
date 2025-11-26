@@ -2,27 +2,31 @@
 
 This module splits the Alibaba dataset into "Training" and "Testing" sets.
 
-It uses Deterministic Hashing instead of random shuffling to ensure every Arm (Linear, Neural, Random) sees the exact same 
+It uses Deterministic Hashing instead of random shuffling to ensure every Arm (Linear, Popularity, Random) sees the exact same
 users in the exact same order. This guarantees a fair comparison.
 """
 
 from pathlib import Path
-from typing import Dict, Literal, Any
+
 import numpy as np
 import pandas as pd
 from sklearn.utils import murmurhash3_32
 
 
 # Local parquet directory - relative to project root
-# (Goes up 3 levels from src/data/splitter.py to find parquet_chunks)
+# (Goes up 3 levels from src/data_utilities/splitter.py to find parquet_chunks)
 LOCAL_PARQUET_DIR = Path(__file__).parent.parent.parent / "parquet_chunks"
 
 
-def _resolve_local_chunk_path(chunk_key: str, base_dir: Path = LOCAL_PARQUET_DIR) -> Path:
+def _resolve_local_chunk_path(chunk_key, base_dir=LOCAL_PARQUET_DIR):
     """Find the actual file path on your computer.
 
-    Allows you to ask for 'chunk_0.parquet' without knowing exactly 
-    where the folder is located on the disk.
+    Args:
+        chunk_key: File name or partial path to look up.
+        base_dir: Base directory to search in.
+
+    Returns:
+        Path object pointing to the found file.
     """
     path = Path(chunk_key)
 
@@ -38,29 +42,31 @@ def _resolve_local_chunk_path(chunk_key: str, base_dir: Path = LOCAL_PARQUET_DIR
     raise FileNotFoundError(f"Could not find file: {chunk_key}")
 
 
-def hash_record_id(record_id: int, seed: int = 42) -> int:
+def hash_record_id(record_id, seed=42):
     """Turn a Request ID into a consistent number between 0 and 99.
 
-    This acts like a fingerprint.
-    - ID 100 with Seed 42 will ALWAYS return the same number.
-    - This allows us to consistently assign specific users to Train or Test.
+    Args:
+        record_id: The ID to hash.
+        seed: Seed for the hash function.
+
+    Returns:
+        Integer from 0 to 99 representing the hash bucket.
     """
     return murmurhash3_32(record_id, seed=seed, positive=True) % 100
 
 
-def split_dataframe(
-    df: pd.DataFrame,
-    split: Literal['train', 'test', 'all'] = 'all',
-    train_ratio: float = 0.8,
-    seed: int = 42,
-    id_column: str = 'id'
-) -> pd.DataFrame:
+def split_dataframe(df, split='all', train_ratio=0.8, seed=42, id_column='id'):
     """Filter the data into a specific split.
 
-    Logic:
-    1. Calculate the fingerprint (0-99) for every row's ID.
-    2. If fingerprint < 80 (assuming 80% train), it goes to Training.
-    3. Otherwise, it goes to Testing.
+    Args:
+        df: DataFrame to split.
+        split: Which split to return ('train', 'test', or 'all').
+        train_ratio: Fraction of data for training (0.0 to 1.0).
+        seed: Seed for deterministic hashing.
+        id_column: Column name containing record IDs.
+
+    Returns:
+        DataFrame containing only the requested split.
     """
     if split == 'all':
         return df.copy()
@@ -76,33 +82,36 @@ def split_dataframe(
         return df[~mask].copy()
 
 
-def load_chunk_split(
-    chunk_path: str,
-    split: Literal['train', 'test', 'all'] = 'all',
-    train_ratio: float = 0.8,
-    seed: int = 42
-) -> pd.DataFrame:
+def load_chunk_split(chunk_path, split='all', train_ratio=0.8, seed=42):
     """Load a file and immediately filter it to the requested split.
 
-    Combines loading and splitting into one step for convenience.
+    Args:
+        chunk_path: Path or name of the parquet file.
+        split: Which split to return ('train', 'test', or 'all').
+        train_ratio: Fraction of data for training (0.0 to 1.0).
+        seed: Seed for deterministic hashing.
+
+    Returns:
+        DataFrame containing only the requested split.
     """
     local_path = _resolve_local_chunk_path(chunk_path)
     df = pd.read_parquet(local_path)
     return split_dataframe(df, split=split, train_ratio=train_ratio, seed=seed)
 
 
-def get_split_statistics(
-    df: pd.DataFrame,
-    split: Literal['train', 'test'] = 'train',
-    train_ratio: float = 0.8,
-    seed: int = 42,
-    id_column: str = 'id',
-    label_column: str = 'labels'
-) -> Dict[str, Any]:
+def get_split_statistics(df, split='train', train_ratio=0.8, seed=42, id_column='id', label_column='labels'):
     """Health Check: Calculate basic stats for a split.
 
-    Verifies how many rows and clicks ended up in this split.
-    Useful to ensure the Train/Test split is balanced (e.g., similar CTR in both).
+    Args:
+        df: DataFrame to analyze.
+        split: Which split to analyze ('train', 'test', or 'all').
+        train_ratio: Fraction of data for training (0.0 to 1.0).
+        seed: Seed for deterministic hashing.
+        id_column: Column name containing record IDs.
+        label_column: Column name containing labels.
+
+    Returns:
+        Dictionary with split, num_records, num_items, num_clicks, ctr, records_with_clicks.
     """
     split_df = split_dataframe(df, split=split, train_ratio=train_ratio, seed=seed, id_column=id_column)
 
@@ -128,15 +137,16 @@ def get_split_statistics(
     }
 
 
-def validate_split_reproducibility(
-    chunk_path: str,
-    seed: int = 42,
-    num_trials: int = 3
-) -> bool:
+def validate_split_reproducibility(chunk_path, seed=42, num_trials=3):
     """Sanity Check: Ensure the split logic is actually deterministic.
 
-    Runs the split multiple times and confirms the results are identical.
-    Returns True if everything is working correctly.
+    Args:
+        chunk_path: Path to the chunk file to test.
+        seed: Seed for the hash function.
+        num_trials: Number of times to repeat the split.
+
+    Returns:
+        True if all trials produced identical splits, False otherwise.
     """
     train_ids_list = []
     test_ids_list = []

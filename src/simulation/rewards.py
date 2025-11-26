@@ -4,19 +4,10 @@ This module compares the generated Slate against the real historical data (Groun
 to determine if a "Click" occurred. If it did, it calculates which Arm gets the credit.
 """
 
-from typing import Dict, List, Optional, Tuple, Union
-
 import numpy as np
 
-from ..interleaving.sampling import AttributionData
 
-
-def compute_reward(
-    slate: List[int],
-    attribution: Dict[int, AttributionData],
-    labels: np.ndarray,
-    click_model: str = "navigational",
-) -> Union[Tuple[Optional[str], Optional[int]], List[Tuple[str, int]]]:
+def compute_reward(slate, attribution, labels, click_model="navigational"):
     """Determine who won the round based on user behavior.
 
     We simulate the user scanning the slate from top to bottom.
@@ -41,7 +32,7 @@ def compute_reward(
     Returns:
         The winner(s) and the rank position(s) of the click(s).
     """
-    valid_clicks: List[Tuple[str, int]] = []
+    valid_clicks = []
 
     for position, item_idx in enumerate(slate):
         # Check Ground Truth: Did the real user click this item?

@@ -15,7 +15,7 @@ S3_PREFIX = "parquet_chunks/"
 LOCAL_DIR = "parquet_chunks"
 
 
-def download_all_chunks(output_dir: str = LOCAL_DIR) -> dict:
+def download_all_chunks(output_dir=LOCAL_DIR):
     """Download all Parquet chunks from S3 to local directory.
 
     Args:
@@ -64,7 +64,7 @@ def download_all_chunks(output_dir: str = LOCAL_DIR) -> dict:
     return {"downloaded": downloaded, "skipped": skipped, "total": total_files}
 
 
-def delete_s3_prefix(bucket: str = S3_BUCKET, prefix: str = S3_PREFIX) -> int:
+def delete_s3_prefix(bucket=S3_BUCKET, prefix=S3_PREFIX):
     """Delete all objects under the given S3 prefix.
 
     Args:
@@ -94,11 +94,7 @@ def delete_s3_prefix(bucket: str = S3_BUCKET, prefix: str = S3_PREFIX) -> int:
     return deleted
 
 
-def upload_parquet_dir(
-    local_dir: str = LOCAL_DIR,
-    bucket: str = S3_BUCKET,
-    prefix: str = S3_PREFIX,
-) -> int:
+def upload_parquet_dir(local_dir=LOCAL_DIR, bucket=S3_BUCKET, prefix=S3_PREFIX):
     """Upload all parquet files from local directory to S3.
 
     Args:
@@ -127,20 +123,3 @@ def upload_parquet_dir(
         if idx == 1 or idx % 25 == 0 or idx == len(files):
             print(f"[{idx}/{len(files)}] Uploaded {path.name}")
     return len(files)
-
-
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) < 2:
-        print("Usage: python s3_utils.py [download|upload]")
-        sys.exit(1)
-
-    cmd = sys.argv[1]
-    if cmd == "download":
-        download_all_chunks()
-    elif cmd == "upload":
-        delete_s3_prefix()
-        upload_parquet_dir()
-    else:
-        print(f"Unknown command: {cmd}")
-        sys.exit(1)

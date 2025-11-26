@@ -1,0 +1,64 @@
+{
+  "scalability": {
+    "3": {
+      "num_arms": 3,
+      "convergence_iteration": 100,
+      "converged_arm": "linear",
+      "elapsed_time": 1.261652946472168,
+      "pairwise_baseline": 3
+    },
+    "5": {
+      "num_arms": 5,
+      "convergence_iteration": 100,
+      "converged_arm": "linear",
+      "elapsed_time": 1.2927560806274414,
+      "pairwise_baseline": 10
+    },
+    "7": {
+      "num_arms": 7,
+      "convergence_iteration": 100,
+      "converged_arm": "linear",
+      "elapsed_time": 1.2966547012329102,
+      "pairwise_baseline": 21
+    },
+    "10": {
+      "num_arms": 10,
+      "convergence_iteration": 200,
+      "converged_arm": "random_9",
+      "elapsed_time": 1.3235218524932861,
+      "pairwise_baseline": 45
+    }
+  },
+  "regret": {
+    "total_iterations": 10020,
+    "convergence_iteration": 100,
+    "converged_arm": "linear",
+    "mdb_cumulative_regret": 0,
+    "ab_cumulative_regret": 6680.0,
+    "regret_reduction_ratio": 1.0,
+    "post_convergence_iterations": 9920,
+    "post_convergence_exposure": 29
+  },
+  "efficiency": {
+    "mdb_convergence_samples": 100,
+    "converged_arm": "linear",
+    "pairwise_tests_needed": 3,
+    "ab_total_samples": 3000,
+    "efficiency_ratio": 30.0,
+    "total_pairwise_comparisons": 66,
+    "comparisons_per_click": 3.0
+  },
+  "baseline": {
+    "ucb": {
+      "clicks": 7159,
+      "iterations": 10020,
+      "ctr": 0.7144710578842315
+    },
+    "uniform": {
+      "clicks": 6457,
+      "iterations": 10020,
+      "ctr": 0.6444111776447106
+    },
+    "ctr_gain": 0.10871921945175773
+  }
+}
