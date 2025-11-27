@@ -1,4 +1,8 @@
 parquet_chunks
+data/mind_dataset/behaviors.tsv
+data/mind_dataset/news.tsv
+data/mind_dataset/relation_embedding.vec
+data/mind_dataset/entity_embedding.vec
 
 __pycache__/
 *.pyc
