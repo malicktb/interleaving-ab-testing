@@ -201,12 +201,6 @@ Validates:
 | Entity data | WikiData knowledge graph | None |
 | Text content | Title + Abstract | None |
 
-## License
-
-The MIND dataset is released under the Microsoft Research License Terms. You must agree to these terms before using the dataset for research purposes.
-
-## References
-
 - **Original Paper:** Wu et al., "MIND: A Large-scale Dataset for News Recommendation", ACL 2020
 - **Official Website:** https://msnews.github.io/
 - **GitHub:** https://github.com/msnews/MIND
