@@ -52,7 +52,7 @@ class LinearTSArm(BaseArm):
         raw_dim = train_records[0].features.shape[1]
 
         if self.use_pca and raw_dim > self.feature_dim:
-            print(f"  Fitting PCA ({raw_dim} -> {self.feature_dim})...")
+            print(f"Fitting PCA ({raw_dim} -> {self.feature_dim})...")
 
             all_features = []
             max_samples = 100000
@@ -69,7 +69,7 @@ class LinearTSArm(BaseArm):
             self.pca = PCA(n_components=self.feature_dim, random_state=42)
             self.pca.fit(X)
 
-            print(f"  PCA explained variance: {self.pca.explained_variance_ratio_.sum():.2%}")
+            print(f"PCA explained variance: {self.pca.explained_variance_ratio_.sum():.2%}")
             effective_dim = self.feature_dim
         else:
             self.use_pca = False

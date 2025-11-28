@@ -40,7 +40,7 @@ def create_click_model(config: ExperimentConfig):
     model_type = scenario_def["click_model_type"]
     params = scenario_def["params"].copy()
 
-    print(f"  > Initializing {model_type} with params: {params}")
+    print(f"Initializing {model_type} with params: {params}")
 
     if model_type == "pbm":
         return PositionBasedModel(max_positions=config.slate_size, **params)

@@ -51,10 +51,10 @@ class Simulator:
             if max_train_records:
                 train_records = train_records[:max_train_records]
 
-        print(f"  Collected {len(train_records)} training records")
+        print(f"Collected {len(train_records)} training records")
 
         for name, arm in self.arms.items():
-            print(f"  Training {name}...")
+            print(f"Training {name}...")
             arm.train(train_records)
 
         if self.ground_truth and not self.ground_truth.is_trained:

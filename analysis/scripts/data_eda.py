@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import numpy as np
 import pyarrow.parquet as pq
-
+import argparse
 
 def analyze_parquet_split(split_dir, max_chunks=None):
     split_path = Path(split_dir)
@@ -112,7 +112,6 @@ def print_summary(results):
 
 
 if __name__ == "__main__":
-    import argparse
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default="data/processed/yahoo_parquet")

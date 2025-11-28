@@ -37,14 +37,14 @@ def fit_and_save_pca(
 ):
     print(f"Loading training features from {train_dir}...")
     X = load_features_from_parquet(train_dir, max_samples)
-    print(f"  Loaded {X.shape[0]} samples with {X.shape[1]} features")
+    print(f"Loaded {X.shape[0]} samples with {X.shape[1]} features")
 
     print(f"Fitting PCA with {n_components} components...")
     pca = PCA(n_components=n_components, random_state=random_state)
     pca.fit(X)
 
     explained_variance = pca.explained_variance_ratio_.sum()
-    print(f"  Explained variance: {explained_variance:.2%}")
+    print(f"Explained variance: {explained_variance:.2%}")
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
