@@ -1,1 +1,0 @@
-# MIND dataset processing scripts
