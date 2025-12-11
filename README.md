@@ -40,19 +40,11 @@ Evaluating **K candidate rankers** with traditional methods has critical drawbac
 H-MDB-KT addresses these issues through hierarchical evaluation with knowledge transfer:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    H-MDB-KT Architecture                     │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  OFFLINE PHASE: Cluster arms by output similarity (Jaccard) │
-│       ↓                                                      │
-│  LEVEL 1: Evaluate M cluster representatives (M << K)        │
-│       ↓                                                      │
-│  KNOWLEDGE TRANSFER: Copy winner's W/N stats to members      │
-│       ↓                                                      │
-│  LEVEL 2: Evaluate winning cluster members with warm start   │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
+H-MDB-KT Architecture                           
+1.OFFLINE PHASE: Cluster arms by output similarity (Jaccard)
+2. LEVEL 1: Evaluate M cluster representatives (M << K)
+3. KNOWLEDGE TRANSFER: Copy winner's W/N stats to members 
+4. LEVEL 2: Evaluate winning cluster members with warm start 
 ```
 
 ### Key Benefits
