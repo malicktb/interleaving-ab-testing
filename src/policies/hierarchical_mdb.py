@@ -1,11 +1,11 @@
 """Hierarchical Multi-Dueling Bandit Policy with Knowledge Transfer.
 
-Implements H-MDB-KT from main.tex Algorithm 1:
+Implements H-MDB-KT from Algorithm 1:
 - Level 1: Cluster representatives (coarse screening)
 - Level 2: Winning cluster members (fine-grained)
 
 Key innovation: Knowledge Transfer (Warm Start) at level transition.
-Per main.tex lines 74-76, cluster members inherit representative's
+cluster members inherit representative's
 statistics instead of starting fresh (eliminates regret spike).
 """
 
@@ -24,7 +24,7 @@ class HierarchicalMDBPolicy(BasePolicy):
     Level 2: Evaluates winning cluster members (fine-grained)
 
     Knowledge Transfer: At level transition, cluster members inherit
-    representative's statistics (warm start) per main.tex Algorithm 1.
+    representative's statistics (warm start)
     """
 
     def __init__(
@@ -117,7 +117,7 @@ class HierarchicalMDBPolicy(BasePolicy):
     def _identify_winning_cluster(self) -> Optional[int]:
         """Identify winning cluster by highest row-sum of empirical wins.
 
-        Per main.tex Algorithm 1 line 103: The winning cluster is determined
+        Algorithm 1 line 103: The winning cluster is determined
         by which representative has the highest sum of wins against all
         other Level 1 arms (pure empirical, no exploration bonus).
 
@@ -149,7 +149,7 @@ class HierarchicalMDBPolicy(BasePolicy):
     def _transition_to_level2(self):
         """Execute transition from Level 1 to Level 2 with Knowledge Transfer.
 
-        Per main.tex Algorithm 1 lines 74-76:
+        Algorithm 1 lines 74-76:
             For k in C_best:
                 N_k <- N_Rep(C_best); W_k <- W_Rep(C_best)
 

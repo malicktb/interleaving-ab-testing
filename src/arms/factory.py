@@ -66,7 +66,7 @@ def create_arm(arm_type: str, config=None, **kwargs) -> BaseArm:
 def generate_xgboost_grid(config, size: str = "medium") -> Dict[str, Any]:
     """Generate XGBoost variants with hyperparameter grid.
 
-    Per main.tex Section 2: "Candidate Pool (K=100): A dense hyperparameter sweep"
+    "Candidate Pool (K=100): A dense hyperparameter sweep"
 
     Grid dimensions for "full" pool (K≈120):
     - max_depth: [3, 5, 6, 8, 10] = 5 values

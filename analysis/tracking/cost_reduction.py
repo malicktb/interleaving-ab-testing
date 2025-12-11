@@ -1,7 +1,7 @@
 """Cost reduction calculation for hierarchical evaluation.
 
 Calculates inference cost reduction from hierarchical evaluation.
-Per main.tex: Cost reduction = Flat MDB inferences / H-MDB inferences
+Cost reduction = Flat MDB inferences / H-MDB inferences
 """
 
 from typing import Dict, Any
@@ -10,7 +10,7 @@ from typing import Dict, Any
 class CostReductionCalculator:
     """Calculate inference cost reduction from hierarchical evaluation.
 
-    Per main.tex: Cost reduction = Flat MDB inferences / H-MDB inferences
+    Cost reduction = Flat MDB inferences / H-MDB inferences
 
     In flat MDB, all K arms are evaluated every round.
     In H-MDB, only cluster representatives are evaluated in Level 1,

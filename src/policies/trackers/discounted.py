@@ -1,6 +1,6 @@
 """Discounted statistics tracker for non-stationary arms.
 
-Implements exponential discounting per main.tex Section 3.1:
+Implements exponential discounting:
 - W^disc uses γ decay (recent wins weighted more)
 - N uses undiscounted counts (for UCB confidence width)
 """
@@ -21,7 +21,7 @@ class DiscountedStatisticsTracker(StatisticsTrackerBase):
     This follows the conservative discounting approach from Garivier & Moulines (2011)
     where estimation uses discounted statistics but exploration uses full counts.
 
-    Formula (from main.tex Section 3.1):
+    Formula:
         W^disc_t = γ * W^disc_{t-1} + ΔW_t
         N_ij = undiscounted symmetric counts
 

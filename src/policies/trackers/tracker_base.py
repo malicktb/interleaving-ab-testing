@@ -92,7 +92,7 @@ class StatisticsTrackerBase(ABC):
         """Copy W/N statistics from source arm to target arms (warm start).
 
         Used for Knowledge Transfer at hierarchical level transitions.
-        Per main.tex Algorithm 1 lines 74-76:
+        Algorithm 1 lines 74-76:
             For k in C_best:
                 N_k <- N_Rep(C_best); W_k <- W_Rep(C_best)
 

@@ -8,7 +8,7 @@ from .trackers import StatisticsTrackerBase
 
 
 class MultiRUCBPolicy(BasePolicy):
-    """MultiRUCB policy per Du et al. (2021) specification from main.tex.
+    """MultiRUCB policy per Du et al. (2021).
 
     Computes pairwise UCB bounds:
         u_ij = w_ij / (w_ij + w_ji) + sqrt(alpha * ln(t) / (w_ij + w_ji))

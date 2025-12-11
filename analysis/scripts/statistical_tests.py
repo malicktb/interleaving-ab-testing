@@ -1,7 +1,7 @@
 """Statistical testing utilities for H-MDB experiment analysis.
 
 Provides bootstrap confidence intervals and multiple comparison corrections
-for rigorous statistical analysis per main.tex Section 5.
+for rigorous statistical analysis
 """
 
 from typing import List, Tuple, Dict, Any, Optional, Callable
@@ -285,7 +285,7 @@ def compute_sample_efficiency(
 ) -> Dict[str, Any]:
     """Compute sample efficiency metrics.
 
-    Per main.tex: Sample complexity is rounds needed for 95% success rate.
+    Sample complexity is rounds needed for 95% success rate.
 
     Args:
         success_rounds: List of round numbers where success occurred.

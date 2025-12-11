@@ -1,6 +1,6 @@
 """Clustering for hierarchical ranker evaluation.
 
-This module implements clustering protocols from main.tex:
+This module implements clustering protocols:
 
 OutputBasedClusterer (Section 3.1):
 - Jaccard similarity on top-10 document IDs across 1000 queries

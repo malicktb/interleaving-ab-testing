@@ -1,6 +1,6 @@
 """Output-based and random clustering for hierarchical ranker evaluation.
 
-Implements clustering protocols from main.tex:
+Implements clustering protocols:
 
 OutputBasedClusterer (Section 3.1):
 - Jaccard similarity on top-10 doc IDs across 1000 queries
@@ -26,7 +26,6 @@ from core.metrics import compute_ndcg
 class OutputBasedClusterer:
     """Clusters static rankers by behavioral similarity (Jaccard on top-k outputs).
 
-    Per main.tex Section 3.2:
     - Jaccard similarity on top-10 doc IDs across 1000 queries
     - HDBSCAN with min_cluster_size=5
     - Representative = highest offline NDCG@5 in cluster
@@ -274,7 +273,7 @@ class OutputBasedClusterer:
 class RandomClusterer:
     """Random clustering baseline for RQ3 ablation.
 
-    Groups arms randomly instead of by behavioral similarity. Per main.tex
+    Groups arms randomly instead of by behavioral similarity.
     Table 1 Config 1.3 (Random-KT): proves that output-based clustering
     is necessary, not just having clusters.
 

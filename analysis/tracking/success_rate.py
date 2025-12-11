@@ -1,7 +1,7 @@
 """Success rate tracking for ranker evaluation.
 
 Tracks whether the selected winner is within a threshold of the best arm's NDCG.
-Per main.tex Section 5.2: Success is defined as selecting a winner
+Section 5.2: Success is defined as selecting a winner
 whose NDCG is within 1% of the true best arm's NDCG.
 """
 
@@ -11,7 +11,7 @@ from typing import Dict, List, Any, Optional, Tuple
 class SuccessRateTracker:
     """Track whether final winner is within threshold of best arm.
 
-    Per main.tex Section 5.2: Success is defined as selecting a winner
+    Section 5.2: Success is defined as selecting a winner
     whose NDCG is within 1% of the true best arm's NDCG.
     """
 
@@ -93,7 +93,7 @@ class SuccessRateTracker:
     def get_sample_complexity(self, success_threshold: float = 0.95) -> Optional[int]:
         """Find first round where success rate reaches threshold.
 
-        Per main.tex: Sample complexity is the number of queries needed
+        Sample complexity is the number of queries needed
         to achieve 95% success rate (within 1% of best).
 
         Args:
