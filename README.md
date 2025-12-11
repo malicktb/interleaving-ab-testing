@@ -41,7 +41,7 @@ H-MDB-KT addresses these issues through hierarchical evaluation with knowledge t
 
 ```
 H-MDB-KT Architecture                           
-1.OFFLINE PHASE: Cluster arms by output similarity (Jaccard)
+1. OFFLINE PHASE: Cluster arms by output similarity (Jaccard)
 2. LEVEL 1: Evaluate M cluster representatives (M << K)
 3. KNOWLEDGE TRANSFER: Copy winner's W/N stats to members 
 4. LEVEL 2: Evaluate winning cluster members with warm start 
