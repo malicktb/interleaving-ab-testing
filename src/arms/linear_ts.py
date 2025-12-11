@@ -118,15 +118,3 @@ class LinearTSArm(BaseArm):
         self.B += (x @ x.T) / self.noise_variance
         self.b += (reward * x) / self.noise_variance
         self._B_inv_dirty = True
-
-    def get_stats(self):
-        stats = {
-            "name": self.name,
-            "feature_dim": self.feature_dim,
-            "use_pca": self.use_pca,
-            "noise_variance": self.noise_variance,
-        }
-        if self.B is not None:
-            stats["trace_B"] = float(np.trace(self.B))
-            stats["norm_b"] = float(np.linalg.norm(self.b))
-        return stats

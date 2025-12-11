@@ -1,11 +1,34 @@
 import numpy as np
+from typing import List, Optional
 from .base import BasePolicy
+from .trackers import StatisticsTrackerBase
 
 
 class MDBPolicy(BasePolicy):
+    """Multi-Dueling Bandit policy with UCB-based arm selection.
 
-    def __init__(self, arm_names, alpha=0.51, beta=1.0, n_min=0):
-        super().__init__(arm_names)
+    Uses Set E (likely winners) and Set F (contenders) to select arms.
+    Supports optional statistics tracker for windowed statistics.
+    """
+
+    def __init__(
+        self,
+        arm_names: List[str],
+        alpha: float = 0.51,
+        beta: float = 1.0,
+        n_min: int = 0,
+        statistics_tracker: Optional[StatisticsTrackerBase] = None,
+    ):
+        """Initialize MDB policy.
+
+        Args:
+            arm_names: List of arm names.
+            alpha: UCB exploration parameter (must be > 0.5).
+            beta: Multiplier for Set F computation (must be >= 1.0).
+            n_min: Grace period rounds before elimination begins.
+            statistics_tracker: Optional tracker for W/N management.
+        """
+        super().__init__(arm_names, statistics_tracker=statistics_tracker)
 
         if alpha <= 0.5:
             raise ValueError("alpha must be > 0.5 to work correctly")

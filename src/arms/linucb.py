@@ -97,15 +97,3 @@ class LinUCBArm(BaseArm):
         self.A += x @ x.T
         self.b += reward * x
         self._A_inv_dirty = True
-
-    def get_stats(self):
-        stats = {
-            "name": self.name,
-            "alpha": self.alpha,
-            "feature_dim": self.feature_dim,
-            "use_pca": self.use_pca,
-        }
-        if self.A is not None:
-            stats["trace_A"] = float(np.trace(self.A))
-            stats["norm_b"] = float(np.linalg.norm(self.b))
-        return stats

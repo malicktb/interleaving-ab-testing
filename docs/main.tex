@@ -1,0 +1,603 @@
+\begin{abstract}
+Traditional A/B testing for online ranker evaluation requires sequential experiments over weeks, exposing users to suboptimal results and scaling linearly with the number of candidate rankers. We replace this approach with Multi-Dueling Bandits (MDB), which evaluates rankers simultaneously by treating them as competing arms and allocating traffic adaptively. However, the standard form of MDB used in prior work is effectively a \emph{flat policy}: it maintains a single pool of all $K$ candidate rankers and evaluates every arm at every round. We refer to this baseline as Flat MDB because it operates on a non-hierarchical, unstructured set of arms with no intermediate filtering or grouping.
+
+While Flat MDB improves over sequential A/B testing, it does not scale to realistic production settings. Because every arm must score every query, Flat MDB requires $O(K)$ model inferences per query—an inference bottleneck that becomes prohibitive when evaluating hundreds of candidate rankers.
+
+To overcome this limitation, we propose H-MDB-KT, a hierarchical variant of MDB designed to replace the flat baseline with a more computationally efficient structure. H-MDB-KT clusters ranking variants based on output similarity and evaluates only their representatives in early rounds, pruning weak clusters before exploring individual members. To preserve statistical strength during this transition, we introduce a Knowledge Transfer mechanism that initializes cluster members using the learned statistics of their representative, preventing the high-variance cold start that typically arises in hierarchical bandits.
+
+Across a variety of simulated user-behavior models, H-MDB-KT reduces online inference costs by 46--86\% relative to Flat MDB, while also achieving 7.9\% lower cumulative regret. By using Flat MDB as the reference point, we show that a hierarchical approach can substantially improve scalability without sacrificing evaluation quality, offering a practical solution for large-scale ranker experimentation. Implementation code is available at \url{https://github.com/malicktb/interleaving-ab-testing}.
+\end{abstract}
+
+\section{Introduction}
+
+Evaluating ranking algorithms in search systems traditionally relies on A/B testing, where a candidate ranker is compared sequentially against a control baseline. For $K$ candidate rankers, this process requires $K$ independent hypothesis tests, each running for weeks to achieve statistical significance. This sequential approach has three major drawbacks: (1) evaluation time scales linearly with the number of candidates, (2) traffic splitting reduces the effective sample size and statistical power per variant, and (3) users assigned to inferior rankers experience degraded results throughout the test period, accumulating what is technically termed \emph{regret}.
+
+We propose reframing online ranker evaluation as a Multi-Dueling Bandit (MDB) problem \cite{brost2016multi}. Unlike A/B testing, MDB treats ranking algorithms as competing arms to be estimated simultaneously. Through multileaving, the system generates a result page that interleaves rankings from multiple active arms. This provides a stochastic preference signal (a ``duel'') rather than an absolute reward. Algorithms like Upper Confidence Bound (UCB) \cite{auer2002finite} then dynamically allocate traffic to arms with higher expected returns, reducing both evaluation time and cumulative regret.
+
+However, scaling MDB to production requirements introduces a critical bottleneck. Standard implementations are ``flat,'' meaning the policy attempts to estimate the expected value of all $K$ arms within a single unstructured pool. This requires every candidate model to perform inference on every query in order to update the joint probability distributions. We refer to this limitation as the Efficiency Trilemma: the unavoidable trade-off between (i) \emph{Scale}, where large hyperparameter sweeps with $K=100+$ candidates must be tested, (ii) \emph{Latency}, since a flat bandit incurs $O(K)$ inferences per query, and (iii) \emph{Quality}, the ability to reliably identify the best-performing ranker without resorting to aggressive approximations.
+
+To address this, we propose H-MDB-KT (Hierarchical MDB with Knowledge Transfer), a two-stage elimination framework. We first cluster ranking variants based on the similarity of their output distributions, and then apply a hierarchical selection process: only cluster representatives are evaluated in the first stage (Level~1), after which the algorithm explores the members of the winning cluster in Level~2. A key challenge in hierarchical bandits is the transition between levels. When the policy descends to Level~2, newly activated cluster members typically have no prior observations, resulting in a Cold Start with high-variance estimates and an initial period of high regret. We mitigate this through Knowledge Transfer, creating a Warm Start by initializing each cluster member’s sufficient statistics (win counts and sample sizes) using the posterior estimates of its representative. This informed prior significantly narrows confidence intervals, preventing the regret spike associated with re-initialization, and allows Level~2 exploration to proceed efficiently.
+
+Our study is guided by three primary research questions. First, we ask whether hierarchical pruning can reduce the average \textit{Inferences Per Query} by at least 50\% compared to a standard Flat MDB, thereby addressing the scalability limitations of existing approaches (Inference Efficiency). Second, we investigate whether initializing arms with informed priors through Knowledge Transfer can eliminate the characteristic ``regret spike'' associated with Cold Start conditions when new arms become active (Knowledge Transfer). Third, we examine whether clustering rankers based on output similarity provides a statistically meaningful advantage over random grouping, thereby validating that behavioral correlation is essential for effective hierarchical pruning (Clustering Validity).
+
+\subsection*{Contributions}
+
+\begin{enumerate}
+\item Conceptual framework: We connect multileaving techniques to Monte Carlo sampling in a multi-armed bandit setting, demonstrating that MDB achieves 4--13x lower regret than A/B baselines.
+\item Simulation environment: We validate our approach using various click models—stochastic generative processes (e.g., Position-Based, Cascade) that simulate user interaction conditional on document relevance.
+\item H-MDB-KT architecture: We introduce hierarchical evaluation with output-based clustering and knowledge transfer, reducing inference costs by 46--86\% while improving regret at scale ($K=100$).
+\item Robustness analysis: We demonstrate that a grace period mechanism protects learning-based rankers (LinUCB, Thompson Sampling) from premature elimination due to high initial variance.
+\end{enumerate}
+
+\section{Background}
+
+\subsection{Learning to Rank (LTR)}
+Learning to Rank (LTR) is the supervised learning task of constructing a \textbf{Ranker}---a function $f(q, D)$ that sorts a set of documents $D$ by predicted relevance to a query $q$. The output of a ranker for a specific query is an ordered list of documents, technically termed a \textbf{slate}.
+
+We evaluate ranking quality using \textbf{Normalized Discounted Cumulative Gain (NDCG)} \cite{jarvelin2002cumulated}, a metric scaled between 0 and 1. NDCG weights document relevance logarithmically by position, reflecting the assumption that errors at the top of the slate are more costly to user experience than errors at the bottom. For a rank cut-off $k$, NDCG is defined as:
+
+\begin{equation}
+\text{NDCG@k} = \frac{\text{DCG@k}}{\text{IDCG@k}}, \quad \text{DCG@k} = \sum_{p=1}^{k} \frac{2^{\text{rel}_p} - 1}{\log_2(p + 1)}
+\end{equation}
+
+where $\text{rel}_p$ is the graded relevance of the document at position $p$, and IDCG is the Ideal DCG achieved by the ground-truth permutation.
+
+\subsection{Multi-Armed Bandits and Regret}
+The Multi-Armed Bandit (MAB) problem models sequential decision-making under uncertainty. In this framework, we rigorously distinguish between two algorithmic layers:
+
+\begin{enumerate}
+    \item \textbf{The Ranking Algorithm (Arm):} The subject of evaluation. Each arm $a$ corresponds to a specific ranking function (e.g., an XGBoost model with fixed hyperparameters). Pulling an arm generates a slate.
+    \item \textbf{The Bandit Algorithm (Policy):} The optimization agent $\pi$. The policy does not produce rankings itself; rather, it decides \textit{which} arms to activate at round $t$ to maximize cumulative reward.
+\end{enumerate}
+
+The statistical objective of the \textbf{Policy} is to minimize the expected cumulative \textbf{Regret} $R(T)$ over $T$ rounds. Regret quantifies the difference between the expected reward of the optimal arm ($\mu^*$) and the expected reward of the arm $a_t$ selected at time $t$:
+
+\begin{equation}
+\mathbb{E}[R(T)] = \sum_{t=1}^{T} (\mu^* - \mathbb{E}[\mu_{a_t}])
+\end{equation}
+
+where $\mu^*$ is the expected quality (NDCG) of the optimal arm. Algorithms such as UCB (Upper Confidence Bound) \cite{auer2002finite} minimize this quantity by constructing confidence intervals around reward estimates to balance exploration (gathering data on uncertain arms) and exploitation (using the best known arm).
+
+\subsection{The Dueling Bandit Problem}
+In online ranking, absolute rewards are often unobservable because ground-truth relevance labels are unavailable. Instead, user clicks provide relative feedback. \textbf{Dueling Bandits} \cite{yue2011beat} replace absolute rewards with pairwise preferences. At each round, the policy compares two arms, observing a binary win/loss outcome drawn from a Bernoulli distribution.
+
+The \textbf{Multi-Dueling Bandit (MDB)} extends this to $K$-way comparisons. The goal is to identify the \textbf{Condorcet Winner}---the arm that beats all other arms in pairwise comparisons with probability $> 0.5$---while minimizing the number of comparisons involving inferior arms. Policies such as MDB \cite{brost2016multi} and MultiRUCB \cite{du2021multi} solve this by maintaining pairwise win/loss statistics to estimate the probability $P(\text{Arm}_i \succ \text{Arm}_j)$.
+
+\subsection{Multileaving}
+To obtain simultaneous pairwise feedback for MDB, we use \textbf{Multileaving} \cite{schuth2015multileaved}. Multileaving algorithms, such as \textbf{Team Draft}, construct a single blended slate by interleaving documents from multiple active rankers.
+
+Crucially, multileaving provides an unbiased estimator of pairwise preference: if users prefer the documents contributed by Ranker A over Ranker B, Ranker A is statistically inferred to satisfy $P(\text{Ranker}_A \succ \text{Ranker}_B) > 0.5$. This allows the bandit algorithm to "pull" multiple arms in a single query.
+
+\subsection{Click Models (Simulated User Behavior)}
+To validate bandit policies without impacting live traffic, we simulate user interactions using Probabilistic Graphical Models known as Click Models. These define the Data Generating Process (DGP) for the reward signal. We follow the standard simulation framework described by Hofmann et al.~\cite{hofmann2013reusing}:
+
+\textbf{Position-Based Model (PBM):}
+This model assumes that a click depends on two independent latent variables: Examination ($E$) and Relevance ($R$). The probability of a click at rank $p$ is:
+\begin{equation}
+P(C_p = 1) = P(E_p = 1) \cdot P(R_p = 1) = \gamma_p \cdot \mathcal{R}(\text{rel}_p)
+\end{equation}
+where $\gamma_p$ is the examination bias (decaying with rank) and $\mathcal{R}(\cdot)$ maps relevance grades to probabilities. This model generates independent Bernoulli trials at each position, allowing for multiple clicks (informational search).
+
+\textbf{Cascade Model:}
+This model assumes a sequential browsing process suitable for navigational queries. The user examines items from $1$ to $p$ and clicks the \emph{first} document that exceeds a relevance threshold $\tau$, then stops. Formally:
+\begin{equation}
+P(C_p = 1) = P(\text{rel}_p \ge \tau) \cdot \prod_{l=1}^{p-1} (1 - P(\text{rel}_l \ge \tau))
+\end{equation}
+This ensures exactly one click (or zero) per query, creating a sparse reward signal that challenges the bandit's convergence rate.
+
+\textbf{Noisy User:}
+To test robustness against irrational behavior, we introduce a noise parameter $\epsilon$. With probability $\epsilon$, the user clicks a position $p \sim U[1, 10]$ uniformly at random, disregarding relevance. This lowers the statistical power of the comparison by reducing the correlation between clicks and document quality.
+
+\section{Problem Formulation}
+Building on the MDB framework introduced in Section~2, we model online ranker evaluation as a sequential decision problem over a finite horizon $T$. Let $\mathcal{K} = \{1, \ldots, K\}$ denote the full set of candidate ranking algorithms (arms). At each round $t$, the system receives a query $q_t$ and selects an active subset $\mathcal{A}_t \subseteq \mathcal{K}$. We define $\mathcal{A}_t$ as the Active Set of arms---the specific competitors chosen to execute inference and contribute to the multileaved slate for query $q_t$. The system observes pairwise preference signals derived from user clicks on this slate, which serve as noisy but unbiased estimators of relative ranking quality between the members of $\mathcal{A}_t$.
+
+\subsection{Regret Model (Quality Objective)}
+We evaluate the statistical performance of the system using \emph{regret}, a central concept in bandit theory that measures the cumulative loss in ranking quality compared to a ground truth that always serves the optimal ranking.
+
+Let $\text{NDCG}^*(q_t)$ denote the ideal ranking score for query $q_t$ (computed using ground-truth labels). Let $\text{NDCG}_{\text{shown}}(q_t)$ represent the score of the multileaved slate actually generated by the active set of arms $\mathcal{A}_t$.
+The \emph{instantaneous regret} is defined as:
+\begin{equation}
+r_t = \text{NDCG}^*(q_t) - \text{NDCG}_{\text{shown}}(q_t).
+\end{equation}
+The relationship between the arms and regret is direct: if the MDB policy includes suboptimal arms in $\mathcal{A}_t$, the resulting blended slate will have a lower $\text{NDCG}_{\text{shown}}$, increasing $r_t$. The goal of the policy is to quickly identify and remove these suboptimal arms to minimize the expected \emph{cumulative regret} over horizon $T$:
+\begin{equation}
+\mathbb{E}[R(T)] 
+= \sum_{t=1}^{T} \left( \mathbb{E}[\text{NDCG}^*(q_t)]
+- \mathbb{E}[\text{NDCG}_{\text{shown}}(q_t)] \right).
+\end{equation}
+
+\subsection{Inference Cost Model (Efficiency Objective)}
+In production Learning-to-Rank systems, theoretical regret is not the only constraint. Each arm corresponds to a deep neural network ranker; therefore, "pulling an arm" incurs a computational cost in the form of inference latency.
+We define the \emph{inference cost} at round $t$ as the cardinality of the active set:
+\begin{equation}
+C_t = |\mathcal{A}_t|.
+\end{equation}
+This formulation highlights a primary difference in MDB design:
+\begin{itemize}
+    \item A \textbf{Flat MDB} policy sets $\mathcal{A}_t = \mathcal{K}$ (all candidates active) to gather pairwise comparisons for every arm simultaneously. This minimizes evaluation time (rounds) but maximizes inference cost ($C_t = K$), leading to high computational costs.
+    \item A \textbf{Constrained} policy (like the proposed H-MDB) must dynamically reduce $|\mathcal{A}_t|$ by pruning arms, trading off statistical information gain to satisfy a global inference budget $\sum C_t \leq B$.
+\end{itemize}
+
+\subsection{Optimization Objectives}
+
+The relationship between the ranking algorithms (arms) and the system's performance is governed by the allocation of traffic over time. Each arm $a \in \mathcal{K}$ has an expected ranking quality
+\[
+\mu_a = \mathbb{E}[\text{NDCG}_a],
+\]
+representing the long-run expected quality if that arm were shown exclusively. Importantly, the arms themselves are passive stochastic processes—they do not learn or adapt. All inference and learning occur in the evaluation system, which must estimate the $\mu_a$ values from noisy pairwise preference signals and choose the active set $\mathcal{A}_t$ accordingly.
+
+\subsubsection{Unconstrained Objective (Flat MDB)}
+
+The classical MDB setting assumes that computational resources are unlimited. The objective is to identify the best arm
+\[
+a^* = \arg\max_{a} \mu_a
+\]
+while minimizing regret. This can be expressed as minimizing the gap between the optimal quality and the average quality of the selected arms (assuming linear additivity of rewards in multileaving):
+\begin{equation}
+\min \sum_{t=1}^{T} \left( 
+\mu_{a^*} - 
+\mathbb{E}\left[ \frac{1}{|\mathcal{A}_t|} 
+\sum_{a \in \mathcal{A}_t} \mu_a \right]
+\right).
+\end{equation}
+This formulation emphasizes a key insight: regret is minimized when the system concentrates the active set $\mathcal{A}_t$ on high-quality arms. In the "Flat" approach, the system typically sets $\mathcal{A}_t = \mathcal{K}$ initially to gather data on all candidates. However, evaluating all arms at every round is computationally expensive when $K$ is large.
+
+\subsubsection{Constrained Objective (H-MDB)}
+
+In compute resource constrained search systems, inference capacity is limited and latency is critical. We therefore strictly constrain the problem by imposing a global inference budget $B$:
+\begin{equation}
+\min \mathbb{E}[R(T)]
+\quad \text{subject to} \quad
+\sum_{t=1}^{T} |\mathcal{A}_t| \leq B.
+\end{equation}
+Budgets of the form $B = \eta K T$ with $\eta < 0.5$ imply that the system cannot afford to compute scores for even half of the candidate pool on average. This constraint forces the immediate need for a strategy that can reject inferior arms without testing them fully—a requirement that leads us to the hierarchical approach described next.
+
+\subsection{Enabling Hierarchical Pruning (H-MDB)}
+
+To solve the constrained optimization problem defined above, we introduce a structural assumption that enables Hierarchical (H) pruning. We assume that the candidate rankers are not uniformly independent \cite{pandey2007multi}; rather, hyperparameter sweeps and model variants often produce rankers whose outputs are highly correlated.
+
+To quantify this correlation offline, we employ a reference set $Q$—a fixed sample of historical queries (e.g., $|Q|=1000$). By running all candidate arms on $Q$ prior to the experiment, we ensure that similarity is measured against a common benchmark of inputs, rather than dynamic, varying live traffic.
+
+We measure the output similarity using the Jaccard index \cite{jaccard1901etude, manning2008introduction} over the top-$k$ rankings generated for $Q$. For any two arms $i$ and $j$:
+\begin{equation}
+J(i, j)
+= \frac{1}{|Q|}
+\sum_{q \in Q}
+\frac{|\text{top}_k(\text{Arm}_i, q) \cap \text{top}_k(\text{Arm}_j, q)|}
+     {|\text{top}_k(\text{Arm}_i, q) \cup \text{top}_k(\text{Arm}_j, q)|}.
+\end{equation}
+
+In this context, the Jaccard index calculates the \emph{Intersection over Union} of the set of document IDs displayed in the top $k$ positions. Intuitively, it measures the percentage of results that two rankers agree should be shown to the user, regardless of the exact relative ordering within that list. We select Jaccard over permutation-based metrics (like Kendall's $\tau$) because, for the purpose of clustering, we are interested in grouping models that retrieve the same consideration set (similar content), even if they swap positions slightly.
+
+By partitioning $\mathcal{K}$ into $M$ disjoint clusters $\{\mathcal{C}_1,\ldots,\mathcal{C}_M\}$ based on this metric, we can select a single representative arm $\rho_m$ for each cluster. This effectively reduces the dimensionality of the initial exploration from $K$ arms to $M$ representatives (where $M \ll K$). Evaluating $\rho_m$ provides a sufficient statistic for the entire cluster, allowing the system to discard entire groups of inferior arms while staying within the inference budget $B$.
+
+\subsection{Enhancing Hierarchy with Knowledge Transfer (KT)}
+
+Although the hierarchical structure reduces inference costs, it creates a new challenge: the \textbf{cold-start problem}. In bandit literature, this term describes the difficulty of estimating the quality of new arms that lack historical interaction data. Because these new arms have no history, the policy faces high variance estimates and must typically perform aggressive exploration to learn.
+
+This problem appears when the system transitions from Level 1 to Level 2. Recall that in Level 1, we only evaluate the set of representatives $\{\rho_1, \ldots, \rho_M\}$. If a specific representative $\rho_m$ statistically outperforms the others, we designate its corresponding group $\mathcal{C}_m$ as the \textbf{winning cluster}. The system then proceeds to Level 2 by activating the individual members of $\mathcal{C}_m$ for detailed testing.
+
+However, when this transition occurs, these member arms enter the active set with zero observations ($N=0$). Consequently, they have infinitely wide confidence intervals, which usually leads to a spike in regret.
+
+To resolve this, we use Knowledge Transfer (KT). When switching levels, we initialize the sufficient statistics (win counts $W$ and trial counts $N$) of each member arm $a \in \mathcal{C}_{\text{win}}$ using the data collected by its representative $\rho_{\text{win}}$. We perform both the direct and symmetric updates for every opponent $j$:
+\begin{equation}
+\begin{aligned}
+W_{a,j} \leftarrow W_{\rho_{\text{win}},j}, \quad & N_{a,j} \leftarrow N_{\rho_{\text{win}},j} \\
+W_{j,a} \leftarrow W_{j,\rho_{\text{win}}}, \quad & N_{j,a} \leftarrow N_{j,\rho_{\text{win}}}
+\end{aligned}
+\end{equation}
+This initialization functions as an informed prior. It allows the members to inherit the statistical evidence gathered by their representative $\rho_{\text{win}}$, reducing variance and preventing the regret spike associated with cold starts.
+
+\section{Methodology}
+
+We evaluate the proposed framework using a discrete-event simulation that models the interaction between the bandit policy, the ranking algorithms, and the user. Both the baseline (Flat MDB) and the proposed method (H-MDB-KT) share the same underlying execution loop, differing only in how they select the active arm set $\mathcal{A}_t$.
+
+\subsection{The Simulation Loop}
+
+At each round $t$, the system executes the following six-step cycle:
+
+\begin{enumerate}
+    \item \textbf{SELECT:} The bandit policy determines the active set of arms $\mathcal{A}_t \subseteq \mathcal{K}$ based on historical statistics and the current exploration strategy.
+    
+    \item \textbf{RANK:} Each active arm $a \in \mathcal{A}_t$ receives the query $q_t$ and generates a ranking (permutation) of documents $\pi_a$.
+    
+    \item \textbf{MULTILEAVE:} The system blends the rankings $\{\pi_a : a \in \mathcal{A}_t\}$ into a single slate $L_t$ using the \textbf{Team Draft} algorithm \cite{schuth2015multileaved}. Team Draft maintains an attribution map $\mathcal{M}: \text{position} \to \text{arm}$ that tracks which arm contributed the document at each rank.
+    
+    \item \textbf{SIMULATE:} The user interacts with slate $L_t$. We generate clicks using the probabilistic Click Models defined in Section~2 (e.g., PBM or Cascade), conditional on the relevance of the documents in $L_t$.
+    
+    \item \textbf{ATTRIBUTE:} If a click occurs at position $p$, the credit is assigned to the arm $\mathcal{M}(p)$. We utilize a \textbf{First-Click Attribution} scheme: the arm responsible for the highest-ranked click is declared the winner of the round.
+    
+    \item \textbf{UPDATE:} The system updates the pairwise statistics. If arm $i$ wins and arm $j$ was in $\mathcal{A}_t$ but did not win, we increment the win count $W_{ij}$ and the comparison count $N_{ij}$. The policy then re-calculates confidence bounds to potentially eliminate inferior arms.
+\end{enumerate}
+
+\subsection{Multi-Dueling Bandit Policies}
+
+We implement two MDB policy variants that share the same pairwise statistics framework but differ in their UCB formulation and selection logic.
+
+\subsubsection{Common Base: Pairwise Statistics}
+Both policies maintain a matrix of pairwise comparisons. For every pair of arms $i, j$, we track:
+\begin{itemize}
+    \item $W_{ij}$: The number of times arm $i$ beat arm $j$.
+    \item $N_{ij}$: The total number of comparisons between arms $i$ and $j$.
+\end{itemize}
+
+\subsection{Flat Multi-Dueling Bandit Policy}
+
+To establish a performance baseline, we implement a standard "Flat" Multi-Dueling Bandit (MDB) policy. This approach treats all $K$ candidates as a single pool of competitors without hierarchical structure, aiming to identify the Condorcet winner through direct pairwise comparisons.
+
+\subsubsection{Pairwise Statistics}
+To quantify uncertainty, we compute both the Upper and Lower Confidence Bounds (UCB/LCB) for the probability that arm $i$ beats arm $j$ at round $t$:
+
+\begin{equation}
+\text{UCB}_{ij} = \frac{W_{ij}}{N_{ij}} + \sqrt{\frac{\alpha \ln t}{N_{ij}}}
+\end{equation}
+
+\begin{equation}
+\text{LCB}_{ij} = \frac{W_{ij}}{N_{ij}} - \sqrt{\frac{\alpha \ln t}{N_{ij}}}
+\end{equation}
+
+where $\alpha$ is an exploration hyperparameter. Additionally, for candidate set construction, we define a parameterized upper bound $\text{UCB}_{ij}^{\beta}$ with a tuning factor $\beta$ (typically $\beta=1.0$):
+\begin{equation}
+\text{UCB}_{ij}^{\beta} = \frac{W_{ij}}{N_{ij}} + \beta\sqrt{\frac{\alpha \ln t}{N_{ij}}}
+\end{equation}
+
+\subsubsection{Set Construction}
+Based on these statistics, the policy dynamically partitions the arm space $\mathcal{K}$ into two subsets at each round:
+
+\begin{enumerate}
+    \item \textbf{Set $\mathcal{E}$ (Proven Winners):} This set contains arms that are statistically superior to all other active competitors. An arm $i$ enters $\mathcal{E}$ only if its lower bound against every other arm $j$ exceeds 0.5:
+    \begin{equation}
+    \mathcal{E} = \{i : \text{LCB}_{ij} > 0.5, \forall j \neq i\}
+    \end{equation}
+
+    \item \textbf{Set $\mathcal{F}$ (Potential Winners):} This set contains arms that still have a statistical chance of being optimal. An arm $i$ remains in $\mathcal{F}$ if its optimistic upper bound suggests it could beat at least one other competitor. Using the parameterized bound:
+    \begin{equation}
+    \mathcal{F} = \{i : \text{UCB}_{ij}^{\beta} > 0.5, \exists j \neq i\}
+    \end{equation}
+\end{enumerate}
+
+\subsubsection{Arm Selection}
+The bandit policy determines the active set $\mathcal{A}_t$ for the current query by prioritizing the exploitation of a proven winner if one exists, otherwise reverting to the exploration of potential winners:
+
+\begin{equation}
+\text{Active arms } (\mathcal{A}_t) = \begin{cases}
+\mathcal{E} & \text{if } |\mathcal{E}| = 1 \quad \text{(Exploit)} \\
+\mathcal{F} & \text{otherwise} \quad \text{(Explore)}
+\end{cases}
+\end{equation}
+
+In the "Flat" setting, $\mathcal{E}$ is typically empty for the majority of the experiment. Consequently, $\mathcal{A}_t = \mathcal{F}$. Since the condition for removal from $\mathcal{F}$ is strict, the active set shrinks slowly, keeping the inference cost ($|\mathcal{A}_t|$) near $O(K)$ for a significant portion of the horizon $T$.
+
+\subsection{H-MDB-KT: Hierarchical MDB with Knowledge Transfer}
+
+To address the inference bottleneck, we propose H-MDB-KT. Unlike the Flat MDB policy, which initializes the active set with the full arm pool $\mathcal{K}$, our method operates in two distinct phases separated by a knowledge transfer event.
+
+\subsubsection{Phase 1: Exploration (Level 1)}
+In the first phase ($t < T_{\text{switch}}$), the system aims to identify the most promising region of the solution space using minimal compute.
+\begin{itemize}
+    \item \textbf{Set Construction:} We restrict the initial candidate pool to the $M$ cluster representatives identified via Jaccard clustering:
+    \[ \mathcal{K}_{\text{level1}} = \{ \rho_1, \rho_2, \ldots, \rho_M \} \]
+    
+    \item \textbf{Arm Selection:} The MDB policy operates strictly on this reduced set. At each round $t$, it calculates the Proven Winner set $\mathcal{E}$ and Potential Winner set $\mathcal{F}$ restricted to $\mathcal{K}_{\text{level1}}$. Consequently, the active set $\mathcal{A}_t$ is always a subset of the representatives, bounding the inference cost at $M$ rather than $K$.
+    
+    \item \textbf{Objective:} The goal is to reach a state where $|\mathcal{E}| = 1$ (a single representative dominates all others) or, failing that, to identify the most promising candidate in $\mathcal{F}$ when the budget for Level 1 is exhausted.
+\end{itemize}
+
+\subsubsection{Phase 2: Knowledge Transfer (The Transition)}
+The transition is triggered when the policy identifies a proven winner ($|\mathcal{E}| = 1$) or a hard time limit $T_{\text{switch}}$ is reached. The cluster $\mathcal{C}^*$ associated with the winning representative $\rho_{\text{win}}$ is designated the winning cluster.
+
+Before Level 2 begins, we execute the Knowledge Transfer mechanism. For every member arm $a \in \mathcal{C}^*$, we initialize its statistics using the history of $\rho_{\text{win}}$ against all other arms $j$:
+\begin{equation}
+\begin{aligned}
+W_{a,j} \leftarrow W_{\rho_{\text{win}},j}, \quad & N_{a,j} \leftarrow N_{\rho_{\text{win}},j} \\
+W_{j,a} \leftarrow W_{j,\rho_{\text{win}}}, \quad & N_{j,a} \leftarrow N_{j,\rho_{\text{win}}}
+\end{aligned}
+\end{equation}
+This step is critical: it converts the posterior belief about the representative into a prior belief for the members. Without this, the members would enter Level 2 with $N=0$ (infinite confidence intervals), forcing the policy to revert to aggressive, high-regret exploration.
+
+\subsubsection{Phase 3: Exploitation (Level 2)}
+In the second phase ($t \ge T_{\text{switch}}$), the system focuses on identifying the specifically optimal parameterization within the winning cluster.
+\begin{itemize}
+    \item \textbf{Set Construction:} The candidate pool is updated to contain only the members of the winning cluster:
+    \[ \mathcal{K}_{\text{level2}} = \mathcal{C}^* = \{ a \in \mathcal{K} \mid a \in \text{Cluster}(\rho_{\text{win}}) \} \]
+    
+    \item \textbf{Arm Selection:} The MDB policy resumes execution on $\mathcal{K}_{\text{level2}}$. Because of the Warm Start (Phase 2), the arms in $\mathcal{C}^*$ enter the set $\mathcal{F}$ with pre-calculated confidence intervals. The policy effectively continues where Level 1 left off, but now resolves the subtle differences between the specific members.
+    
+    \item \textbf{Efficiency:} Since $|\mathcal{C}^*| \ll K$, the inference cost remains low throughout this phase, even though the system is now evaluating full-complexity models.
+\end{itemize}
+
+\subsection{Random-KT (Ablation Baseline)}
+To validate the necessity of output-based clustering, we introduce Random-KT. This variant uses the exact same hierarchical structure and knowledge transfer mechanism as H-MDB-KT, but replaces the clustering logic:
+
+\begin{enumerate}
+    \item \textbf{Random Clustering:} The arm pool $\mathcal{K}$ is partitioned into $M$ clusters via random round-robin assignment, ignoring output similarity.
+    \item \textbf{Random Representative:} The first member of each random cluster is arbitrarily designated as the representative $\rho_m$.
+\end{enumerate}
+
+This ablation isolates the quality of the clustering signal. If behavioral similarity is required for valid pruning, Random-KT should fail to identify the best arm (high regret), because the representative provides no statistical information about the quality of its random cluster members.
+
+\subsection{Ranking Arms (Candidate Pool)}
+
+To simulate a realistic production environment, we construct a diverse pool of $K=100$ ranking arms. These represent the action space $\mathcal{K}$ available to the MDB policy. The pool comprises two distinct categories of rankers:
+
+\subsubsection{Static Arms (Stationary Distributions)}
+These arms utilize a fixed scoring function $f(q, d)$ trained offline. Their expected performance $\mu_a$ is constant over time, satisfying the standard i.i.d. assumption of the bandit framework.
+
+\begin{itemize}
+    \item \textbf{XGBoost Variants (27 arms):} We generate a grid of Gradient Boosted Decision Trees trained on the Yahoo LTR training set. We permute three hyperparameters: tree depth $\in \{3, 6, 9\}$, learning rate $\in \{0.01, 0.1, 0.3\}$, and estimator count $\in \{50, 100, 200\}$. This generates a set of highly correlated arms, providing the ideal testbed for the clustering hypothesis.
+    \item \textbf{Single Feature (10 arms):} Rankers that sort documents strictly by a single raw feature (e.g., BM25 score). These serve as weak baselines that a good policy should prune early.
+    \item \textbf{Random (1 arm):} A stochastic ranker that outputs a uniform random permutation. This serves as a lower-bound sanity check.
+\end{itemize}
+
+\subsubsection{Learning Arms (Non-Stationary Distributions)}
+These arms update their internal parameters online based on click feedback. From the perspective of the evaluation policy, their performance $\mu_a(t)$ is a stochastic process that evolves over time.
+
+\begin{itemize}
+    \item \textbf{LinUCB (4 arms):} Contextual bandit algorithms \cite{li2010contextual} using disjoint linear models, with varying internal exploration parameters $\alpha \in \{0.1, 0.5, 1.0, 2.0\}$.
+    \item \textbf{LinearTS (1 arm):} A Thompson Sampling \cite{agrawal2013thompson} agent using Bayesian linear regression.
+\end{itemize}
+
+\subsubsection{Handling Non-Stationarity: The Grace Period}
+Evaluating learning arms alongside static arms introduces a bias known as the Cold Start asymmetry.
+\begin{itemize}
+    \item Static arms enter the experiment with asymptotic performance (having been trained on historical data).
+    \item Learning arms enter with random or zero initialization. Their initial performance $\mu_a(0)$ is typically far below their potential convergence value $\mu_a(\infty)$.
+\end{itemize}
+
+If the MDB elimination logic is applied immediately at $t=1$, the pre-trained static arms will statistically dominate the untrained learners, causing the policy to eliminate the learners before they have processed enough data to converge. This leads to a False Negative—discarding an arm that is locally inferior but globally optimal.
+
+To prevent this, we enforce a \textbf{Grace Period} constraint. The elimination rule is suspended for any pair of arms $(i, j)$ until they have been compared at least $n_{\min}$ times:
+\begin{equation}
+\text{Eliminate } i \iff (\exists j : \text{UCB}_{ij} < 0.5) \land (N_{ij} \ge n_{\min})
+\end{equation}
+In our experiments, we set $n_{\min} = 500$, ensuring that learning arms acquire sufficient training samples to stabilize their parameters before facing elimination pressure.
+
+\subsubsection{Ground Truth (Regret Benchmark)}
+\begin{itemize}
+    \item \textbf{GroundTruth:} A theoretical ranker that sorts documents monotonically according to the dataset's human-annotated relevance labels. This arm is observable only by the environment, not the policy, and is used strictly to calculate the optimal term $\text{NDCG}^*$ for the regret metric.
+\end{itemize}
+
+\section{Experimental Setup}
+
+\subsection{Dataset}
+
+We evaluate our framework on the Yahoo Learning to Rank Challenge (Set 1) benchmark~\cite{chapelle2011yahoo}, utilizing 19{,}944 queries and 473{,}134 documents. Each document is represented by 519 normalized dense features and a human-annotated relevance grade $y \in \{0,1,2,3,4\}$. The label distribution is heavily skewed toward non-relevant items, with only 2.3\% of documents assigned the maximum relevance grade.
+
+To simulate realistic production constraints in which feature computation is expensive, we treat feature extraction as part of the inference cost. Consequently, for contextual bandit arms (e.g., LinUCB), we apply Principal Component Analysis (PCA) to reduce the feature space from 519 to 20 dimensions.
+
+\subsection{Baselines and Comparators}
+We compare the proposed H-MDB-KT against a suite of baselines representing both state-of-the-art bandit methods and traditional evaluation strategies:
+
+\textbf{Primary Baselines:}
+\begin{enumerate}
+    \item \textbf{Flat MDB:} The standard Multi-Dueling Bandit policy described in Section 4.2. It initializes with $\mathcal{A}_t = \mathcal{K}$ and prunes arms based on UCB. This represents the current state-of-the-art for simultaneous evaluation but incurs $O(K)$ inference cost.
+    \item \textbf{Sequential A/B (Simulated):} A traditional testing strategy that compares one candidate against a fixed control per round. We simulate this by running a sequence of pairwise tests, which serves as a baseline for the speed of convergence.
+    \item \textbf{Uniform Exploration:} A naive policy that selects the active set $\mathcal{A}_t = \mathcal{K}$ at every round with no elimination. This provides a lower bound on statistical efficiency and an upper bound on inference cost.
+\end{enumerate}
+
+\textbf{Bounds and Ablations:}
+\begin{enumerate}
+    \item \textbf{Random-KT (Ablation):} Uses the hierarchical structure of H-MDB-KT but replaces Jaccard clustering with random grouping. This isolates the contribution of the output-based clustering signal (RQ3).
+    \item \textbf{Fixed (Ground Truth):} A theoretical oracle that always ranks by true label. This defines the lower bound for Regret ($R(T) = 0$).
+    \item \textbf{Fixed (Random):} A ranker that outputs random permutations. This defines the upper bound for Regret ("worst-case" user experience).
+\end{enumerate}
+
+\subsection{Implementation Details}
+The simulation is implemented in Python using the \texttt{XGBoost} library for static rankers and \texttt{scikit-learn} for PCA. The detailed hyperparameters are listed in Table~\ref{tab:params}.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Horizon ($T$) & 10,000 rounds \\
+Slate size & 10 documents \\
+UCB exploration ($\alpha$) & 0.51 \\
+Discount factor ($\gamma$) & 0.999 \\
+Grace period ($n_{\min}$) & 500 rounds \\
+Level 1 duration ($T_{\text{switch}}$) & 2,000 rounds \\
+Arm pool size ($K$) & 100 arms \\
+Clustering Reference Set ($|Q|$) & 1,000 queries \\
+Seeds per configuration & 10 \\
+\bottomrule
+\end{tabular}
+\caption{Global experimental parameters}
+\label{tab:params}
+\end{table}
+
+\textbf{Clustering Configuration:}
+For the H-MDB-KT method, clustering is performed offline using HDBSCAN \cite{campello2013density} with a minimum cluster size of 5. The Jaccard similarity is computed over the top-$k=10$ documents on the reference query set.
+
+\subsection{Target Metrics}
+To assess the proposed framework, we report the following metrics averaged over 10 independent random seeds:
+
+\begin{enumerate}
+    \item \textbf{Cumulative Regret (Lower is Better):} 
+    The total accumulated loss in ranking quality over the horizon $T$:
+    $$ R(T) = \sum_{t=1}^{T} r_t $$
+    Lower values indicate that the algorithm showed better search results to users during the experiment.
+    \item \textbf{Total Inference Cost:} 
+    The total number of heavy model evaluations performed throughout the experiment:
+    \[ \text{Cost} = \sum_{t=1}^{T} |\mathcal{A}_t| \]
+    This represents the aggregate computational cost.
+
+    \item \textbf{Cost Reduction Ratio (Higher is Better):} 
+    The percentage of compute resources saved by H-MDB-KT compared to the standard Flat MDB baseline:
+    \[
+    1 - \frac{\text{Cost}_{\text{H-MDB}}}{\text{Cost}_{\text{Flat}}}
+    \]
+    A value of 50\% implies the method requires only half the compute cost of the baseline.
+
+    \item \textbf{Average Arms Per Query (Lower is Better):} 
+    The amortized size of the active set per round:
+    \[ \text{Avg Arms} = \frac{1}{T}\sum_{t=1}^{T} |\mathcal{A}_t| \]
+    This serves as a direct proxy for latency and server throughput. While any individual query always requires an integer number of model inferences (e.g., $|\mathcal{A}_t|=2$ for a pairwise duel or $|\mathcal{A}_t|=1$ for pure exploitation), a fractional value (e.g., 1.54) indicates the average load on the system, reflecting the policy's dynamic ratio of exploration to exploitation.
+\end{enumerate}
+
+\section{Results}
+
+\subsection{Validation of Base Hypothesis: MDB vs. Traditional Methods}
+
+To validate the fundamental motivation for shifting from A/B testing to bandit-based evaluation, we compared the cumulative regret of the proposed MDB policy against industry-standard baselines over a horizon of $T=7{,}000$ iterations. Figure~\ref{fig:regret_comparison} visualizes these trajectories, and Table~\ref{tab:baseline_comparison} quantifies the final performance.
+
+\begin{table}[h]
+\centering
+\caption{Comparison of Cumulative Regret at $T=7{,}000$. The MDB policy achieves near-optimal convergence (logarithmic regret), whereas Sequential A/B testing suffers from linear regret accumulation.}
+\label{tab:baseline_comparison}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Policy} & \textbf{Cumulative Regret} ($R_T$) & \textbf{Improvement vs. A/B} \\
+\midrule
+Sequential A/B & $138.5 \pm 4.2$ & --- \\
+Thompson Sampling & $146.1 \pm 5.8$ & -5.5\% \\
+Uniform Random & $46.8 \pm 1.5$ & +66.2\% \\
+\textbf{MDB} & \textbf{10.9} $\pm$ \textbf{0.8} & \textbf{+92.1\%} \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\textbf{Analysis of Convergence Rates:}
+The results strongly confirm the base hypothesis that simultaneous evaluation via MDB is superior to sequential testing methods.
+\begin{itemize}
+    \item \textbf{MDB (Logarithmic Regret):} The MDB curve (solid blue) exhibits a characteristic logarithmic shape. It rises briefly during the initial exploration phase and then flattens out effectively near iteration 1,500. This indicates that the policy successfully identified the Condorcet winner early and shifted almost entirely to exploitation, preventing further user exposure to suboptimal rankers.
+    
+    \item \textbf{Sequential A/B (Linear Regret):} The Sequential A/B baseline (red dotted line) exhibits linear regret growth ($R_T \propto T$). Because A/B testing commits traffic to inferior variants for fixed durations to achieve statistical significance, it accumulates regret at a constant rate throughout the experiment. As shown in Table~\ref{tab:baseline_comparison}, MDB reduces this regret by 92.1\%, demonstrating that sequential hypothesis testing is highly inefficient for large-scale ranker selection.
+    
+    \item \textbf{Baseline Anomalies:} Interestingly, the Uniform strategy outperformed Sequential A/B in this specific simulation ($R_T \approx 47$ vs $138$). This occurs because Sequential A/B locks users into prolonged testing periods with specific bad arms, whereas Uniform spreads traffic evenly, diluting the negative impact of the worst arms. However, Uniform still accumulates significantly higher regret than MDB, as it never stops exploring inferior arms.
+\end{itemize}
+
+\subsection{Inference and Knowledge Transfer Efficiency}
+
+Table~\ref{tab:rq1} summarizes the performance benchmarks comparing H-MDB-KT against the Flat MDB baseline across 10 random seeds.
+
+\begin{table}[h]
+\centering
+\caption{Benchmark results. H-MDB-KT drastically reduces the average number of models evaluated per query (Arms/Q) while improving ranking quality (Regret).}
+% \resizebox scales the table to exactly the width of the column (\columnwidth)
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Method} & \textbf{Regret} & \textbf{Arms/Q} & \textbf{Cost Red.} \\
+\midrule
+Flat MDB  & $2410.4 \pm 63.8$  & 2.86 & --- \\
+H-MDB-KT  & $2219.8 \pm 50.5$  & 1.54 & 46.2\% \\
+Random-KT & $2519.0 \pm 191.4$ & 1.85 & 35.3\% \\
+\bottomrule
+\end{tabular}%
+}
+\label{tab:rq1}
+\end{table}
+
+\textbf{Inference Efficiency:} 
+H-MDB-KT achieves a 46.2\% reduction in computational overhead compared to the baseline. The \textbf{Arms/Q} metric highlights the fundamental efficiency gap:
+\begin{itemize}
+    \item \textbf{Flat MDB (2.86):} The baseline requires nearly 3 model inferences per query on average. This reflects a prolonged exploration phase where the policy is forced to continuously test many pairs from the large unstructured pool ($K=100$) to identify a winner.
+    \item \textbf{H-MDB-KT (1.54):} Our method reduces the amortized cost to 1.54. While any single query requires an integer number of inferences (typically 2 for a duel or 1 for exploitation), this fractional average indicates that the system spends significantly more time in the low-cost exploitation state ($|\mathcal{A}_t|=1$). Ideally, a system would approach 1.0 (the cost of a standard A/B test); H-MDB-KT bridges the gap between the statistical power of bandits and the operational efficiency of A/B testing.
+\end{itemize}
+
+\textbf{Regret Analysis:}
+The pruning does not harm quality; H-MDB-KT achieves 7.9\% lower cumulative regret ($2219.8$) than the Flat baseline ($2410.4$). By filtering out entire clusters of inferior arms in Level~1 (rounds 1--2{,}000) using only $M \approx \sqrt{K}$ representatives, the algorithm avoids exposing users to bad rankers. In Level~2 (rounds 2{,}001--10{,}000), it focuses the regret budget strictly on the high-quality members of the winning cluster.
+
+\textbf{Clustering Validity (Random-KT):}
+The Random-KT ablation confirms that the structure of the hierarchy matters. While Random-KT reduces cost by 35.3\%, it incurs 13.5\% higher regret than H-MDB-KT ($2519.0$ vs $2219.8$).
+This performance degradation validates the hypothesis that output-based clustering is the source of the efficiency signal. In H-MDB-KT, arms with high Jaccard similarity produce correlated user experiences; thus, a winning representative reliably signals a high-quality cluster. Random grouping violates this assumption—a randomly assigned representative provides no statistical information about its cluster members, leading to false negatives (pruning good clusters) and high-regret exploration in Level 2.
+
+\subsection{Scalability Analysis}
+
+To isolate the structural efficiency of the hierarchical architecture from the dynamic pruning effects of the UCB policy, we performed a scalability stress test under a Uniform Exploration regime (i.e., no early stopping). Table~\ref{tab:scalability} reports the total computational cost (number of model forward passes) required to fully evaluate the arm pool as $K$ increases.
+
+\begin{table}[h]
+\centering
+\caption{Scalability analysis under a Uniform Exploration regime. While the Flat baseline scales linearly ($O(K)$), the Hierarchical approach scales sub-linearly, decoupling inference cost from the number of candidates.}
+\label{tab:scalability}
+% Resize to fit column width
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}ccccc@{}}
+\toprule
+\textbf{K} & \textbf{Uniform Flat} & \textbf{Uniform H-MDB} & \textbf{Cost Red.} & \textbf{Reg. Ratio} \\
+\midrule
+20  & 199,938   & 41,783  & 79.1\% & 1.00 \\
+60  & 599,960   & 87,691  & 85.4\% & 1.00 \\
+100 & 1,000,000 & 144,898 & 85.5\% & 1.00 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+The results confirm the theoretical complexity models and highlight the massive search-space reduction provided by H-MDB-KT:
+
+\begin{itemize}
+    \item \textbf{Inference Scaling:} The "Uniform Flat" column exhibits strict linear $O(K)$ scaling, reaching exactly 1,000,000 evaluations for $K=100$ ($100 \text{ arms} \times 10,000 \text{ rounds}$). This represents the prohibitive cost of an exhaustive search. In contrast, "Uniform H-MDB" exhibits sub-linear growth, demonstrating that hierarchical clustering effectively decouples inference costs from the raw count of candidate rankers.
+    
+    \item \textbf{Efficiency Gains:} The "Cost Red." column highlights that our structural advantage improves with scale, rising from 79.1\% at $K=20$ to 85.5\% at $K=100$. This confirms that H-MDB-KT is particularly well-suited for large-scale production environments where $K$ is large.
+    
+    \item \textbf{Quality Preservation:} The "Reg. Ratio" of 1.00 indicates that H-MDB-KT matched the evaluation quality of the exhaustive baseline exactly. Even after pruning $\sim$85\% of the inferences (evaluating only 144k samples instead of 1M), the hierarchical method successfully identified the same optimal ranker and incurred no additional regret compared to the exhaustive search. This validates that the pruned clusters contained only suboptimal arms safe for removal.
+\end{itemize}
+
+\subsection{Robustness Analysis: The Impact of Grace Periods}
+
+
+To determine the optimal ``Warm Up'' duration for non-stationary learning arms (e.g., LinUCB), we analyzed the system's stability across varying Grace Periods ($n_{\min}$).
+
+\textbf{Analysis of the Phase Transition:}
+The results validate the necessity of a protected Grace Period to handle non-stationary arms.
+
+\begin{itemize}
+    \item \textbf{Premature Elimination ($n_{\min} < 500$):} In this regime, both Sample Complexity and Cumulative Regret are superficially low. However, this is a failure mode. The pre-trained static arms statistically dominate the untrained LinUCB arm immediately, causing the policy to eliminate the learner before it converges. While efficient, this results in a False Negative where the potentially optimal learner is discarded.
+    
+    \item \textbf{The Phase Transition ($n_{\min} = 500$):} At the optimal threshold, we observe a significant spike in both variance and cost (Iterations $\approx 260$, Regret $\approx 21$). This cost represents the "Price of Learning." The grace period is sufficiently long for the learner to improve its internal model, allowing it to survive the initial cut and enter a prolonged duel with the best static arm. The high variance indicates the volatile competitive dynamics between the converging learner and the static baseline.
+    
+    \item \textbf{Diminishing Returns ($n_{\min} > 500$):} As the grace period extends beyond the convergence point of the learner, the metrics flatten. The learner effectively "wins" during the protected period, leading to instant elimination of opponents once the grace period expires. Increasing $n_{\min}$ further effectively reverts the system to a fixed-horizon A/B test, removing the efficiency benefits of the bandit.
+\end{itemize}
+
+\section{Discussion}
+
+\subsection{Why MDB Achieves Efficiency Gains}
+Our results confirm that framing ranker evaluation as a Multi-Dueling Bandit problem is fundamentally superior to sequential A/B testing. The efficiency gain arises from Dynamic Traffic Allocation. In a traditional A/B test, traffic is split evenly ($50/50$) for a fixed duration regardless of performance. In contrast, the MDB policy (via UCB) treats evaluation as an optimization problem. By continuously updating confidence intervals, the MDB identifies the "Condorcet Winner" early (roughly iteration 1,500 in Figure~\ref{fig:regret_comparison}) and shifts the vast majority of traffic to the best arms. This transforms the regret accumulation from a linear function ($O(T)$) to a logarithmic one ($O(\log T)$), reducing the total cost of experimentation.
+
+\subsection{Why H-MDB-KT Achieves Efficiency Gains}
+While MDB addresses sample complexity, H-MDB-KT resolves the inference bottleneck by exploiting the structural redundancy inherent in large hyperparameter sweeps. Because variations in model parameters often yield highly correlated ranking outputs, treating every candidate as an independent arm is computationally wasteful. H-MDB-KT overcomes this through a coarse-to-fine evaluation strategy: it first employs Jaccard-based clustering to screen $M \approx \sqrt{K}$ representatives, rapidly discarding low-performing regions of the solution space using minimal compute. Crucially, the transition to fine-grained evaluation is smoothed by Knowledge Transfer, which initializes the optimal cluster's members with their representative’s history. This prevents the ``double exploration'' penalty, allowing the policy to prune inferior members almost immediately and amortizing the cost of the initial screening phase across the entire evaluation.
+
+\subsection{When to Use H-MDB-KT}
+H-MDB-KT is the preferred framework when:
+\begin{itemize}
+    \item \textbf{High Latency Constraints:} When the production inference budget cannot support evaluating more than 1.5--2.0 models per query on average.
+    \item \textbf{Large Action Spaces ($K \geq 50$):} The overhead of offline clustering is justified only when the arm pool is large enough to contain significant redundancy.
+    \item \textbf{Correlated Arms:} The method excels with hyperparameter sweeps or ensemble variants. For highly diverse arm pools (e.g., completely different model architectures) where outputs are uncorrelated, Flat MDB or simple A/B testing may be preferable.
+\end{itemize}
+
+\subsection{Limitations}
+\textbf{1. Simulation Bias:} Our experiments utilize synthetic click models (PBM, Cascade). While standard in LTR research, these models assume stationary user relevance probabilities, whereas real users may drift in their preferences over time.
+
+\textbf{2. Offline Clustering Dependency:} The efficacy of the hierarchy depends on the quality of the reference query set ($Q$) used for clustering. If the live traffic distribution deviates significantly from $Q$ (covariate shift), the pre-computed clusters may no longer accurately group similar arms.
+
+\textbf{3. Fixed Hierarchy:} We employ a static two-level hierarchy. For extremely large pools ($K > 500$), a deeper, multi-level hierarchy or an adaptive clustering mechanism \cite{hong2022deep} that updates online might yield further gains.
+
+\section{Conclusion}
+
+We presented H-MDB-KT, a hierarchical multi-dueling bandit framework designed to resolve the ``Efficiency Trilemma'' in large-scale online ranker evaluation. By structuring the candidate pool based on output similarity and employing a novel Knowledge Transfer mechanism, we successfully bridge the gap between the statistical power of bandits and compute resource constraints.
+
+Our experimental validation on the Yahoo Learning to Rank benchmark demonstrates:
+
+\begin{enumerate}
+    \item \textbf{Inference Efficiency:} H-MDB-KT reduces the online inference cost by 46.2\% compared to standard MDB. In scalability stress tests ($K=100$), the method reduces the total forward passes by 85.5\%, exhibiting sub-linear scaling that decouples evaluation cost from the number of candidates.
+    
+    \item \textbf{Latency Reduction:} The method reduced the average active set size to 1.54 arms per query. This amortized cost approaches the operational efficiency of standard A/B testing (1.0) while retaining the adaptive benefits of bandit exploration.
+    
+    \item \textbf{Quality Improvement:} Pruning improved evaluation quality. H-MDB-KT achieved 7.9\% lower cumulative regret than the exhaustive Flat MDB, proving that focusing resources on promising clusters protects users from suboptimal rankers.
+    
+    \item \textbf{Clustering Validity:} The necessity of behavioral grouping was confirmed by the Random-KT ablation, which suffered 13.5\% higher regret ($2519.0$ vs $2219.8$). This confirms that Jaccard-based similarity provides a critical statistical signal for valid hierarchical pruning.
+\end{enumerate}
+
+H-MDB-KT offers a practical framework for scalable ranker evaluation. By overcoming the limitations of sequential A/B testing and Flat MDB, it provides an efficient, low-latency solution for automating search optimization.
+
+\textbf{Future Work:} Future research will focus on \emph{Adaptive Online Clustering}, allowing the system to dynamically restructure clusters based on live feedback rather than offline reference sets, and extending the framework to handle reward signals beyond clicks, such as dwell time or conversion.
+
+\bibliography{references}
+\bibliographystyle{plain}
+
+\end{document}

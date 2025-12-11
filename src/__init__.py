@@ -1,3 +1,15 @@
+"""Source module for H-MDB framework.
+
+This module provides modeling components:
+- arms: Ranking algorithms
+- policies: Bandit policies
+- multileaving: Slate construction and attribution
+- clustering: H-MDB clustering
+
+For simulation components, see the simulation package.
+For shared base classes and utilities, see the core package.
+"""
+
 from .arms import (
     BaseArm,
     RandomArm,
@@ -6,16 +18,8 @@ from .arms import (
     LinearTSArm,
     GroundTruthArm,
     SingleFeatureArm,
-    create_arm,
 )
-from .environment import DataLoader, QueryRecord, Simulator
-from .environment.click_models import (
-    ClickSimulator,
-    PositionBasedModel,
-    CascadeModel,
-    NoisyUserModel,
-)
-from .multileaving import interleave, get_click_winner, compute_credit
+from .multileaving import interleave
 from .policies import (
     BasePolicy,
     MDBPolicy,
@@ -23,9 +27,9 @@ from .policies import (
     FixedPolicy,
     SingleArmThompsonSamplingPolicy,
 )
-from .utils import Profiler, compute_ndcg
 
 __all__ = [
+    # Arms
     "BaseArm",
     "RandomArm",
     "XGBoostArm",
@@ -33,22 +37,12 @@ __all__ = [
     "LinearTSArm",
     "GroundTruthArm",
     "SingleFeatureArm",
-    "create_arm",
-    "DataLoader",
-    "QueryRecord",
-    "Simulator",
-    "ClickSimulator",
-    "PositionBasedModel",
-    "CascadeModel",
-    "NoisyUserModel",
+    # Multileaving
     "interleave",
-    "get_click_winner",
-    "compute_credit",
+    # Policies
     "BasePolicy",
     "MDBPolicy",
     "UniformPolicy",
     "FixedPolicy",
     "SingleArmThompsonSamplingPolicy",
-    "Profiler",
-    "compute_ndcg",
 ]
