@@ -160,7 +160,7 @@ python run_experiment.py --policy ts --scenario standard --rounds 5000
 python run_experiment.py --policy fixed:xgboost --scenario standard --rounds 5000
 ```
 
-### 2. H-MDB-KT Experiments (RQ1: Inference Efficiency)
+### 2. H-MDB-KT Experiments (Inference Efficiency)
 
 ```bash
 # H-MDB-KT with output-based clustering
@@ -178,7 +178,7 @@ python run_experiment.py \
     --rounds 10000
 ```
 
-### 3. Knowledge Transfer Ablation (RQ2)
+### 3. Knowledge Transfer Ablation
 
 ```bash
 # With Knowledge Transfer (warm start)
@@ -196,7 +196,7 @@ python run_experiment.py \
     --rounds 10000
 ```
 
-### 4. Clustering Validity (RQ3)
+### 4. Clustering Validity
 
 ```bash
 # Output-based clustering (H-MDB-KT)
