@@ -9,11 +9,7 @@ This module contains:
 from dataclasses import dataclass, field
 from typing import Dict, Any
 
-
-# =============================================================================
 # Click Model Scenarios
-# =============================================================================
-
 SCENARIOS: Dict[str, Dict[str, Any]] = {
     "standard": {
         "click_model_type": "pbm",
